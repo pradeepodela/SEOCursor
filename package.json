@@ -1,0 +1,53 @@
+{
+  "name": "seo-cursor",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "node ./dist/server/entry.mjs",
+    "astro": "astro",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio",
+    "smoke": "node scripts/smoke.mjs",
+    "crawl": "node scripts/crawl.mjs",
+    "render-check": "node scripts/render-check.mjs",
+    "purge-mock": "node scripts/purge-mock.mjs",
+    "uicheck": "node scripts/uicheck.mjs",
+    "llm-check": "node scripts/llm-check.mjs",
+    "wp-check": "node scripts/wp-check.mjs",
+    "hydrate-check": "node scripts/hydrate-check.mjs",
+    "dev:clean": "rm -rf node_modules/.vite .astro && astro dev"
+  },
+  "dependencies": {
+    "@astrojs/node": "^9.5.5",
+    "@astrojs/react": "^4.4.2",
+    "@crawlee/playwright": "^3.18.1",
+    "@prisma/client": "^6.19.3",
+    "astro": "^5.18.2",
+    "cheerio": "^1.2.0",
+    "crawlee": "^3.18.1",
+    "playwright": "^1.63.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "prisma": "^6.19.3",
+    "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.27.7": true,
+    "esbuild@0.25.12": true,
+    "fsevents@2.3.3": true,
+    "prisma@6.19.3": true,
+    "sharp@0.34.5": true
+  }
+}

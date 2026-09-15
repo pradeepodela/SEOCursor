@@ -1,0 +1,80 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact, pos, HEALTH_LABEL } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const q = Astro.url.searchParams.get('q')?.trim() ?? '';
+const conn = await db.gscConnection.findUnique({ where: { siteId: site.id } });
+const connected = !!conn?.propertyUrl && !!conn.lastSyncAt;
+
+const pages = await db.page.findMany({
+  where: {
+    siteId: site.id,
+    ...(q ? { OR: [{ url: { contains: q, mode: 'insensitive' } }, { title: { contains: q, mode: 'insensitive' } }, { primaryTopic: { contains: q, mode: 'insensitive' } }] } : {}),
+  },
+  orderBy: connected ? [{ impressions: 'desc' }] : [{ depth: 'asc' }, { url: 'asc' }],
+});
+
+const totalImpressions = pages.reduce((n, p) => n + p.impressions, 0);
+const needWork = pages.filter((p) => p.health === 'NEEDS_WORK' || p.health === 'POOR').length;
+const noContent = pages.filter((p) => p.wordCount < 300).length;
+---
+<App active="pages" title="Pages">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Pages</h1>
+      <p class="sub">{pages.length} pages crawled on {site.domain} · sorted by {connected ? 'impressions' : 'crawl depth'}</p>
+    </div>
+    <form class="row" method="get">
+      <input type="hidden" name="site" value={site.id} />
+      <input class="input" name="q" value={q} placeholder="Filter by URL or topic…" style="width:230px;height:32px" />
+      <button class="btn" type="submit"><Icon name="search" size={13} /></button>
+    </form>
+  </div>
+
+  <div class="meta-grid" style="margin-bottom:18px;max-width:640px">
+    <div class="meta-cell"><div class="meta-k">Pages</div><div class="meta-v">{pages.length}</div></div>
+    <div class="meta-cell"><div class="meta-k">Impressions</div><div class="meta-v">{connected ? compact(totalImpressions) : '—'}</div></div>
+    <div class="meta-cell"><div class="meta-k">Need work</div><div class="meta-v" style="color:var(--amber)">{needWork}</div></div>
+    <div class="meta-cell"><div class="meta-k">Under 300 words</div><div class="meta-v" style="color:var(--amber)">{noContent}</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">All pages</div>
+      <div class="card-sub">{connected ? 'Performance from Search Console' : 'Crawl data only'}</div>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>URL</th><th>Title</th><th class="num">Words</th><th class="num">Inbound</th>
+            <th class="num">Impressions</th><th class="num">Clicks</th><th class="num">Position</th>
+            <th>Health</th><th class="num">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pages.map((p) => (
+            <tr class="clickable" onclick={`location.href='/pages/${p.id}?site=${site.id}'`}>
+              <td><span class="mono" style="color:var(--blue)">{p.url}</span></td>
+              <td style="max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{p.title}</td>
+              <td class="num" style={p.wordCount < 300 ? 'color:var(--amber);font-weight:600' : ''}>{p.wordCount || '—'}</td>
+              <td class="num" style={p.inboundLinks === 0 ? 'color:var(--amber);font-weight:600' : ''}>{p.inboundLinks}</td>
+              <td class="num">{connected ? compact(p.impressions) : '—'}</td>
+              <td class="num">{connected ? p.clicks : '—'}</td>
+              <td class="num">{p.position ? pos(p.position) : '—'}</td>
+              <td><span class={`badge ${HEALTH_LABEL[p.health].tone}`}>{HEALTH_LABEL[p.health].text}</span></td>
+              <td class="num"><span class={`badge ${(p.statusCode ?? 0) >= 400 ? 'red' : (p.redirectHops > 0 ? 'amber' : 'gray')}`}>{p.statusCode ?? '—'}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {pages.length === 0 && <div class="empty">No pages match "{q}".</div>}
+    </div>
+  </div>
+</App>

@@ -1,0 +1,87 @@
+---
+import Icon from './Icon.astro';
+interface Props {
+  active: string;
+  counts: { issues: number; criticalIssues: number; pages: number; keywords: number; ideas: number; drafts: number; scheduled: number };
+  siteId: string;
+  gscConnected: boolean;
+}
+const { active, counts, siteId, gscConnected } = Astro.props;
+const q = `?site=${siteId}`;
+
+/** Only what is backed by real data today. */
+const LIVE = [
+  { key: 'home',     label: 'Overview',  href: `/${q}`,          icon: 'home' },
+  { key: 'audit',    label: 'SEO Audit', href: `/audit${q}`,     icon: 'shield', count: counts.issues, hot: counts.criticalIssues > 0 },
+  { key: 'pages',    label: 'Pages',     href: `/pages${q}`,     icon: 'file',   count: counts.pages },
+  { key: 'keywords', label: 'Keywords',  href: `/keywords${q}`,  icon: 'key',    count: counts.keywords, dim: !gscConnected },
+  { key: 'links',    label: 'Links',     href: `/links${q}`,     icon: 'link' },
+];
+
+const PLAN = [
+  { key: 'ideas',    label: 'Blog Ideas', href: `/ideas${q}`,    icon: 'sparkle',  count: counts.ideas },
+  { key: 'calendar', label: 'Calendar',   href: `/calendar${q}`, icon: 'calendar', count: counts.scheduled },
+  { key: 'studio',   label: 'Content',    href: `/studio${q}`,   icon: 'edit',     count: counts.drafts },
+];
+
+const MANAGE = [
+  { key: 'websites', label: 'Websites', href: `/websites${q}`, icon: 'globe' },
+  { key: 'mcp',      label: 'MCP Server', href: `/mcp${q}`,    icon: 'database' },
+];
+
+/** Built in later steps — shown so the shape of the product is legible. */
+const LATER = [
+  { key: 'competitors',   label: 'Competitors',   icon: 'users' },
+  { key: 'opportunities', label: 'Opportunities', icon: 'target' },
+];
+---
+<aside class="rail">
+  <a class="rail-brand" href={`/${q}`}>
+    <div class="rail-mark">S</div>
+    <span class="rail-name">SEO Cursor</span>
+  </a>
+
+  <nav class="rail-scroll">
+    {LIVE.map((i) => (
+      <a class={`nav-item ${active === i.key ? 'active' : ''}`} href={i.href}>
+        <Icon name={i.icon} class="nav-icon" />
+        <span>{i.label}</span>
+        {i.count > 0 && <span class={`nav-count ${i.hot ? 'hot' : ''}`}>{i.count}</span>}
+      </a>
+    ))}
+
+    <div class="rail-label">Plan &amp; write</div>
+    {PLAN.map((i) => (
+      <a class={`nav-item ${active === i.key ? 'active' : ''}`} href={i.href}>
+        <Icon name={i.icon} class="nav-icon" />
+        <span>{i.label}</span>
+        {i.count > 0 && <span class="nav-count">{i.count}</span>}
+      </a>
+    ))}
+
+    <div class="rail-label">Workspace</div>
+    {MANAGE.map((i) => (
+      <a class={`nav-item ${active === i.key ? 'active' : ''}`} href={i.href}>
+        <Icon name={i.icon} class="nav-icon" />
+        <span>{i.label}</span>
+      </a>
+    ))}
+
+    <div class="rail-label">Next steps</div>
+    {LATER.map((i) => (
+      <span class="nav-item nav-later" title="Not built yet">
+        <Icon name={i.icon} class="nav-icon" />
+        <span>{i.label}</span>
+        <span class="nav-soon">soon</span>
+      </span>
+    ))}
+  </nav>
+
+  <div class="rail-foot">
+    <a class={`nav-item ${active === 'settings' ? 'active' : ''}`} href={`/settings${q}`}>
+      <Icon name="settings" class="nav-icon" />
+      <span>Settings</span>
+      {!gscConnected && <span class="nav-count hot">!</span>}
+    </a>
+  </div>
+</aside>

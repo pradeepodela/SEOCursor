@@ -1,0 +1,122 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import Sparkline from '../components/Sparkline.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact, pos, sparkPath } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [metrics, pages] = await Promise.all([
+  db.metricPoint.findMany({ where: { siteId: site.id }, orderBy: { date: 'asc' } }),
+  db.page.findMany({ where: { siteId: site.id, traffic: { gt: 0 } }, orderBy: { traffic: 'desc' }, take: 8 }),
+]);
+
+const series = (k: string) => metrics.filter((m) => m.metric === k).map((m) => m.value);
+const traffic = series('organic_traffic');
+const bigPath = sparkPath(traffic, 800, 180);
+const bigArea = bigPath ? `${bigPath} L800,180 L0,180 Z` : '';
+const maxT = Math.max(...traffic, 1);
+const minT = Math.min(...traffic, 0);
+const totalTraffic = pages.reduce((n, p) => n + p.traffic, 0);
+---
+<App active="analytics" title="Analytics">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Analytics</h1>
+      <p class="sub">Organic performance for {site.domain} · last 30 days</p>
+    </div>
+    <button class="btn btn-ai" data-ask="What changed in my traffic this month?">
+      <Icon name="sparkle" size={14} />Explain the trend
+    </button>
+  </div>
+
+  <div class="kpis" style="margin-bottom:18px">
+    <div class="kpi"><div class="kpi-label">Organic sessions</div><div class="kpi-val">{compact(site.organicTraffic)}</div>
+      <div class="kpi-foot"><span class="delta up"><Icon name="arrowUp" size={12} />{site.trafficDelta}%</span><Sparkline values={series('organic_traffic')} color="var(--green)" /></div></div>
+    <div class="kpi"><div class="kpi-label">Ranking keywords</div><div class="kpi-val">{compact(site.keywordCount)}</div>
+      <div class="kpi-foot"><span class="delta up"><Icon name="arrowUp" size={12} />{site.keywordDelta}%</span><Sparkline values={series('keywords')} color="var(--green)" /></div></div>
+    <div class="kpi"><div class="kpi-label">Indexed pages</div><div class="kpi-val">{site.indexedPages}</div>
+      <div class="kpi-foot"><span class="delta up"><Icon name="arrowUp" size={12} />{site.pagesDelta}%</span><Sparkline values={series('indexed_pages')} color="var(--green)" /></div></div>
+    <div class="kpi"><div class="kpi-label">Open issues</div><div class="kpi-val">{site.issueCount}</div>
+      <div class="kpi-foot"><span class="delta up"><Icon name="arrowDown" size={12} />{Math.abs(site.issueDelta)}%</span><Sparkline values={series('issues')} color="var(--green)" /></div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Organic traffic</div>
+        <div class="card-sub">{compact(minT)} → {compact(maxT)} over 30 days</div>
+      </div>
+      <span class="badge green"><Icon name="trending" size={11} />+{site.trafficDelta}%</span>
+    </div>
+    <div style="padding:20px 18px 14px">
+      <svg viewBox="0 0 800 180" preserveAspectRatio="none" style="width:100%;height:180px;display:block">
+        <defs>
+          <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--blue)" stop-opacity="0.16" />
+            <stop offset="100%" stop-color="var(--blue)" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, 45, 90, 135, 180].map((y) => (
+          <line x1="0" y1={y} x2="800" y2={y} stroke="var(--line-2)" stroke-width="1" vector-effect="non-scaling-stroke" />
+        ))}
+        <path d={bigArea} fill="url(#tg)" />
+        <path d={bigPath} fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-4);margin-top:8px">
+        <span>Aug 30</span><span>Sep 7</span><span>Sep 14</span><span>Sep 21</span><span>Sep 28</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid home-split" style="grid-template-columns:minmax(0,1fr) 320px;align-items:start">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Top pages by organic traffic</div>
+        <a class="btn btn-sm" href={`/pages?site=${site.id}`}>All pages</a>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Page</th><th class="num">Sessions</th><th class="num">Impressions</th><th class="num">Position</th><th style="width:120px">Share</th></tr></thead>
+          <tbody>
+            {pages.map((p) => (
+              <tr class="clickable" onclick={`location.href='/pages/${p.id}?site=${site.id}'`}>
+                <td><span class="mono" style="color:var(--blue)">{p.url}</span></td>
+                <td class="num">{compact(p.traffic)}</td>
+                <td class="num">{compact(p.impressions)}</td>
+                <td class="num">{pos(p.position)}</td>
+                <td>
+                  <div class="bar-track" style="margin:0">
+                    <div class="bar-fill" style={`width:${(p.traffic / totalTraffic) * 100}%;background:var(--blue)`}></div>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="card-title">What the AI sees</div></div>
+      <div style="padding:16px 18px;font-size:13px;color:var(--ink-2);line-height:1.65">
+        <p style="margin:0 0 12px">
+          Traffic is up {site.trafficDelta}% but almost all of the gain came from two pages — <span class="mono" style="color:var(--blue)">/blog/what-is-a-crm</span>
+          and <span class="mono" style="color:var(--blue)">/pricing</span>.
+        </p>
+        <p style="margin:0 0 12px">
+          That is a concentration risk, not a win. Your next 30 days should widen the base rather than push those two harder.
+        </p>
+        <p style="margin:0">
+          The 47K impressions sitting on page-2 rankings are the cheapest source of the next increment.
+        </p>
+        <button class="btn btn-sm btn-ai" style="margin-top:14px" data-ask="What should we work on this week?">
+          <Icon name="sparkle" size={12} />Turn this into a plan
+        </button>
+      </div>
+    </div>
+  </div>
+</App>

@@ -1,0 +1,73 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact, relDate } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [backlinks, competitors] = await Promise.all([
+  db.backlink.findMany({ where: { siteId: site.id }, orderBy: { domainRating: 'desc' } }),
+  db.competitor.findMany({ where: { siteId: site.id }, orderBy: { backlinkCount: 'desc' } }),
+]);
+
+const dofollow = backlinks.filter((b) => b.dofollow).length;
+const avgDR = Math.round(backlinks.reduce((n, b) => n + b.domainRating, 0) / Math.max(backlinks.length, 1));
+const gap = (competitors[0]?.backlinkCount ?? 0) - site.backlinkCount;
+---
+<App active="backlinks" title="Backlinks">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Backlinks</h1>
+      <p class="sub">{compact(site.backlinkCount)} referring links · domain rating {site.domainRating}</p>
+    </div>
+    <button class="btn btn-ai" data-ask="How does my backlink profile compare to competitors?">
+      <Icon name="sparkle" size={14} />Compare the profile
+    </button>
+  </div>
+
+  <div class="kpis" style="margin-bottom:18px">
+    <div class="kpi"><div class="kpi-label">Total backlinks</div><div class="kpi-val">{compact(site.backlinkCount)}</div><div class="kpi-note" style="margin-top:5px">across {backlinks.length} tracked sources</div></div>
+    <div class="kpi"><div class="kpi-label">Domain Rating</div><div class="kpi-val">{site.domainRating}</div><div class="kpi-note" style="margin-top:5px">out of 100</div></div>
+    <div class="kpi"><div class="kpi-label">Avg. source DR</div><div class="kpi-val">{avgDR}</div><div class="kpi-note" style="margin-top:5px">quality is good</div></div>
+    <div class="kpi"><div class="kpi-label">Gap to leader</div><div class="kpi-val" style="color:var(--amber)">{compact(gap)}</div><div class="kpi-note" style="margin-top:5px">vs {competitors[0]?.domain}</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="insight" style="margin:16px 18px">
+      <div class="insight-tag"><Icon name="sparkle" size={11} />AI Insight</div>
+      <div class="insight-body">
+        Your link quality is better than your link count suggests — average source DR of {avgDR} is higher than every tracked competitor.
+        <strong>The constraint is volume, not authority, and volume follows content.</strong> Chasing links directly at DR {site.domainRating} is slower
+        than publishing the {competitors[0]?.contentCount ? 'cluster content' : 'content'} that earns them; the comparison pages in your backlog are the
+        kind of asset that gets cited.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">Referring links</div>
+      <div class="card-sub">{dofollow} dofollow · {backlinks.length - dofollow} nofollow</div>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Source</th><th class="num">DR</th><th>Anchor text</th><th>Target</th><th>Type</th><th>First seen</th></tr></thead>
+        <tbody>
+          {backlinks.map((b) => (
+            <tr>
+              <td><span style="font-weight:530">{b.sourceDomain}</span></td>
+              <td class="num"><span class={`badge ${b.domainRating >= 80 ? 'green' : b.domainRating >= 50 ? 'blue' : 'gray'}`}>{b.domainRating}</span></td>
+              <td class="muted">{b.anchorText}</td>
+              <td><span class="mono" style="color:var(--blue);font-size:12px">{b.targetUrl}</span></td>
+              <td><span class={`badge ${b.dofollow ? 'green' : 'gray'}`}>{b.dofollow ? 'Dofollow' : 'Nofollow'}</span></td>
+              <td class="muted" style="font-size:12px">{relDate(b.firstSeen)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</App>

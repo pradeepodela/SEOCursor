@@ -1,0 +1,29 @@
+---
+import '../styles/global.css';
+import '../styles/components.css';
+import Connect from '../islands/Connect';
+import { db } from '../lib/db';
+
+const hasSites = (await db.site.count()) > 0;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connect a website · SEO Cursor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232563eb'/><text y='70' x='50' text-anchor='middle' font-size='58' font-family='system-ui' font-weight='700' fill='white'>S</text></svg>" />
+</head>
+<body>
+  <div class="onboard">
+    <div style="width:min(520px,100%)">
+      <Connect client:load />
+      {hasSites && (
+        <div style="text-align:center;margin-top:18px">
+          <a href="/" style="font-size:13px;color:var(--ink-3)">← Back to the workspace</a>
+        </div>
+      )}
+    </div>
+  </div>
+</body>
+</html>

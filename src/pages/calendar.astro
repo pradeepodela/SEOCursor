@@ -1,0 +1,63 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import CalendarBoard from '../islands/CalendarBoard';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [rows, wp] = await Promise.all([
+  db.calendarItem.findMany({
+    where: { siteId: site.id },
+    include: { blogIdea: true, content: true },
+    orderBy: { date: 'asc' },
+  }),
+  db.wordPressConnection.findUnique({ where: { siteId: site.id } }),
+]);
+
+const items = rows.map((r) => ({
+  id: r.id,
+  date: r.date.toISOString(),
+  type: r.type,
+  title: r.title,
+  status: r.status,
+  autoGenerate: r.autoGenerate,
+  autoPublish: r.autoPublish,
+  ranAt: r.ranAt?.toISOString() ?? null,
+  runError: r.runError,
+  ideaId: r.blogIdeaId,
+  contentId: r.contentId,
+  contentWords: r.content?.wordCount ?? null,
+  wpUrl: r.content?.wpUrl ?? null,
+  rationale: r.blogIdea?.rationale ?? null,
+  targetQuery: r.blogIdea?.targetQuery ?? null,
+}));
+
+const pending = rows.filter((r) => !r.ranAt && r.status !== 'DONE').length;
+---
+<App active="calendar" title="Content Calendar">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Content calendar</h1>
+      <p class="sub">
+        {pending} scheduled · items generate themselves on their day
+      </p>
+    </div>
+    <a class="btn btn-primary" href={`/ideas?site=${site.id}`}><Icon name="plus" size={13} />Schedule a post</a>
+  </div>
+
+  {items.length === 0 ? (
+    <div class="locked" style="padding:44px 22px">
+      <div class="locked-title">Nothing scheduled</div>
+      <div class="locked-body">
+        Generate blog titles, then schedule the ones you want. On the day, each one writes itself —
+        and publishes too, if you asked it to.
+      </div>
+      <a class="btn btn-primary" style="margin-top:16px" href={`/ideas?site=${site.id}`}>Go to ideas</a>
+    </div>
+  ) : (
+    <CalendarBoard client:load items={items} siteId={site.id} wpReady={!!wp} />
+  )}
+</App>

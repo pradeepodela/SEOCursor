@@ -1,0 +1,14 @@
+---
+interface Props { label: string; value: string; count?: number; max?: number; mono?: boolean; missing?: boolean; }
+const { label, value, count, max, mono = false, missing = false } = Astro.props;
+const over = count !== undefined && max !== undefined && count > max;
+---
+<div class="fld">
+  <div class="fld-k">
+    <span>{label}</span>
+    {count !== undefined && max !== undefined && (
+      <span style={over ? 'color:var(--amber)' : ''}>{count}/{max}</span>
+    )}
+  </div>
+  <div class={`fld-v ${mono ? 'mono' : ''} ${missing ? 'missing' : ''}`}>{value}</div>
+</div>

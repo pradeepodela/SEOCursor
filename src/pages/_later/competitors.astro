@@ -1,0 +1,113 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const competitors = await db.competitor.findMany({ where: { siteId: site.id }, orderBy: { label: 'asc' } });
+const clusters = await db.strategyCluster.findMany({ where: { siteId: site.id }, orderBy: { priority: 'asc' } });
+
+const rows = [
+  { k: 'Organic Traffic', you: compact(site.organicTraffic), vals: competitors.map((c) => compact(c.organicTraffic)) },
+  { k: 'Keywords', you: compact(site.keywordCount), vals: competitors.map((c) => compact(c.keywordCount)) },
+  { k: 'Backlinks', you: compact(site.backlinkCount), vals: competitors.map((c) => compact(c.backlinkCount)) },
+  { k: 'Domain Rating', you: String(site.domainRating), vals: competitors.map((c) => String(c.domainRating)) },
+  { k: 'Indexed content', you: String(site.indexedPages), vals: competitors.map((c) => String(c.contentCount)) },
+];
+---
+<App active="competitors" title="Competitors">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Competitors</h1>
+      <p class="sub">Numbers are the easy part. What matters is which gaps you can actually close.</p>
+    </div>
+    <div class="row">
+      <button class="btn"><Icon name="plus" size={13} />Add competitor</button>
+      <button class="btn btn-ai" data-ask="Compare with competitors"><Icon name="sparkle" size={13} />Explain the gap</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-head"><div class="card-title">Head to head</div></div>
+    <div style="overflow-x:auto">
+      <table class="comp-tbl">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th class="you-col">You · {site.domain}</th>
+            {competitors.map((c) => (
+              <th><span class="comp-head-cell"><span class="dot" style={`background:${c.color}`}></span>{c.domain}</span></th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr>
+              <td>{r.k}</td>
+              <td class="you-col you">{r.you}</td>
+              {r.vals.map((v) => <td>{v}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin-bottom:18px">
+    {competitors.map((c) => (
+      <div class="card">
+        <div class="card-head">
+          <div class="row">
+            <span class="comp-av" style={`background:${c.color};margin:0`}>{c.label}</span>
+            <div>
+              <div class="card-title">{c.name}</div>
+              <div class="card-sub mono">{c.domain}</div>
+            </div>
+          </div>
+          <span class="badge gray">DR {c.domainRating}</span>
+        </div>
+        <div class="meta-grid" style="border:none;border-radius:0">
+          <div class="meta-cell"><div class="meta-k">Traffic</div><div class="meta-v">{compact(c.organicTraffic)}</div></div>
+          <div class="meta-cell"><div class="meta-k">Keywords</div><div class="meta-v">{compact(c.keywordCount)}</div></div>
+          <div class="meta-cell"><div class="meta-k">Content</div><div class="meta-v">{c.contentCount}</div></div>
+        </div>
+        {c.insight && (
+          <div class="insight" style="margin:16px 18px">
+            <div class="insight-tag"><Icon name="sparkle" size={11} />What they do better</div>
+            <div class="insight-body">{c.insight} <strong>{c.insightGap}</strong></div>
+            <button class="btn btn-sm btn-primary" style="margin-top:11px" data-ask={`Explore the content gap against ${c.name}`}>Explore Opportunity</button>
+          </div>
+        )}
+      </div>
+    ))}
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Topic coverage</div>
+        <div class="card-sub">Where their content exists and yours does not.</div>
+      </div>
+    </div>
+    <div style="padding:6px 0">
+      {clusters.map((cl) => (
+        <div style="display:flex;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid var(--line-2)">
+          <div style="flex:0 0 130px;font-size:13px;font-weight:550">{cl.pillar}</div>
+          <div style="flex:1;min-width:0">
+            <div class="bar-track" style="height:6px">
+              <div class="bar-fill" style={`width:${(cl.covered / cl.total) * 100}%;background:${cl.covered / cl.total > .6 ? 'var(--green)' : cl.covered === 0 ? 'var(--red)' : 'var(--amber)'}`}></div>
+            </div>
+            <div style="font-size:11.5px;color:var(--ink-3);margin-top:5px">{cl.children.slice(0, 4).join(' · ')}</div>
+          </div>
+          <div style="flex:0 0 66px;text-align:right;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums">
+            {cl.covered}/{cl.total}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</App>

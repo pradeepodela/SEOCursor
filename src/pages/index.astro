@@ -1,0 +1,219 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import HealthGauge from '../components/HealthGauge.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact, num, pos, relDate, scoreColor } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [issues, critical, pages, topPages, keywords, nearMiss, brokenLinks, conn, lastCrawl] = await Promise.all([
+  db.auditIssue.count({ where: { siteId: site.id, resolved: false } }),
+  db.auditIssue.findMany({ where: { siteId: site.id, resolved: false, severity: 'CRITICAL' }, orderBy: { affectedCount: 'desc' }, take: 4 }),
+  db.page.count({ where: { siteId: site.id, crawledAt: { not: null } } }),
+  db.page.findMany({ where: { siteId: site.id, impressions: { gt: 0 } }, orderBy: { impressions: 'desc' }, take: 6 }),
+  db.keyword.count({ where: { siteId: site.id } }),
+  db.keyword.findMany({ where: { siteId: site.id, opportunity: 'HIGH' }, orderBy: { impressions: 'desc' }, take: 6 }),
+  db.link.count({ where: { siteId: site.id, verdict: 'broken' } }),
+  db.gscConnection.findUnique({ where: { siteId: site.id } }),
+  db.crawlJob.findFirst({ where: { siteId: site.id }, orderBy: { startedAt: 'desc' } }),
+]);
+
+const hasCrawl = !!site.lastCrawlAt;
+const hasGsc = !!conn?.propertyUrl && !!conn.lastSyncAt;
+
+const bars = [
+  { name: 'Technical', v: site.technicalScore },
+  { name: 'On-page', v: site.onPageScore },
+  { name: 'Content', v: site.contentScore },
+  { name: 'User experience', v: site.uxScore },
+];
+---
+<App active="home" title="Overview">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">{site.domain}</h1>
+      <p class="sub">
+        {hasCrawl
+          ? `Crawled ${relDate(site.lastCrawlAt!, new Date())} · ${pages} pages · ${site.renderMode === 'browser' ? 'headless browser' : 'HTTP'}`
+          : 'Not crawled yet'}
+      </p>
+    </div>
+    <div class="row">
+      <a class="btn" href={`/settings?site=${site.id}`}><Icon name="refresh" size={13} />Re-crawl</a>
+      {!hasGsc && <a class="btn btn-primary" href={`/settings?site=${site.id}`}><Icon name="chart" size={13} />Connect Search Console</a>}
+    </div>
+  </div>
+
+  {!hasCrawl && (
+    <div class="locked" style="margin-bottom:18px">
+      <div class="locked-title">Nothing crawled yet</div>
+      <div class="locked-body">Run a crawl from Settings to populate this workspace.</div>
+    </div>
+  )}
+
+  <!-- Measured facts -->
+  <div class="kpis" style="margin-bottom:18px">
+    <div class="kpi">
+      <div class="kpi-label">Pages crawled <span class="src src-crawl"><span class="src-dot"></span>crawl</span></div>
+      <div class="kpi-val">{num(pages)}</div>
+      <div class="kpi-note" style="margin-top:5px">{site.sitemapUrls.length ? 'sitemap found' : 'no sitemap'}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Findings <span class="src src-crawl"><span class="src-dot"></span>crawl</span></div>
+      <div class="kpi-val" style={issues ? 'color:var(--amber)' : ''}>{num(issues)}</div>
+      <div class="kpi-note" style="margin-top:5px">{critical.length} critical</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Broken links <span class="src src-crawl"><span class="src-dot"></span>crawl</span></div>
+      <div class="kpi-val" style={brokenLinks ? 'color:var(--red)' : 'color:var(--green)'}>{num(brokenLinks)}</div>
+      <div class="kpi-note" style="margin-top:5px">{lastCrawl?.linksChecked ?? 0} checked</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">
+        Organic clicks
+        <span class={`src ${hasGsc ? 'src-gsc' : 'src-none'}`}><span class="src-dot"></span>{hasGsc ? 'search console' : 'not connected'}</span>
+      </div>
+      <div class="kpi-val" style={hasGsc ? '' : 'color:var(--ink-4)'}>{hasGsc ? compact(site.organicTraffic) : '—'}</div>
+      <div class="kpi-note" style="margin-top:5px">{hasGsc ? `${keywords} ranking queries` : 'connect to measure'}</div>
+    </div>
+  </div>
+
+  <div class="grid home-split" style="grid-template-columns: 340px minmax(0,1fr); margin-bottom:18px">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Health</div>
+          <div class="card-sub">Computed from the crawl, not estimated</div>
+        </div>
+      </div>
+      <div class="health-wrap">
+        <HealthGauge score={site.healthScore} size={96} />
+        <div class="bars">
+          {bars.map((b, i) => (
+            <div>
+              <div class="bar-row">
+                <span class="bar-name">{b.name}</span>
+                <span class="bar-val" style={`color:${scoreColor(b.v)}`}>{b.v}</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill" style={`width:${b.v}%;background:${scoreColor(b.v)};animation-delay:${i * 70}ms`}></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style="padding:0 18px 16px">
+        <div style="font-size:11.5px;color:var(--ink-4);line-height:1.5">
+          Backlink authority needs a third-party provider and is not scored here — a crawl cannot see it.
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Fix these first</div>
+          <div class="card-sub">Critical findings, most-affected first</div>
+        </div>
+        <a class="btn btn-sm" href={`/audit?site=${site.id}`}>Full audit</a>
+      </div>
+      <div>
+        {critical.map((i) => (
+          <a class="issue" href={`/audit?site=${site.id}&issue=${i.id}`} style="display:block">
+            <div class="issue-top">
+              <span class="dot sev-CRITICAL"></span>
+              <span class="issue-title">{i.title}</span>
+              <span class="badge gray">{i.category}</span>
+            </div>
+            <div class="issue-why">{i.whyItMatters}</div>
+          </a>
+        ))}
+        {critical.length === 0 && (
+          <div class="empty">
+            <div class="empty-icon">✓</div>
+            {hasCrawl ? 'No critical issues found.' : 'Run a crawl to see findings.'}
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid home-split" style="grid-template-columns: minmax(0,1fr) minmax(0,1fr)">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Closest to page one</div>
+          <div class="card-sub">Real impressions, position 8–30</div>
+        </div>
+        {hasGsc && <a class="btn btn-sm" href={`/keywords?site=${site.id}`}>All keywords</a>}
+      </div>
+      {hasGsc ? (
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Query</th><th class="num">Impressions</th><th class="num">Clicks</th><th class="num">Position</th></tr></thead>
+            <tbody>
+              {nearMiss.map((k) => (
+                <tr>
+                  <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{k.keyword}</td>
+                  <td class="num">{compact(k.impressions)}</td>
+                  <td class="num">{k.clicks}</td>
+                  <td class="num"><span class="badge amber">{pos(k.position)}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {nearMiss.length === 0 && <div class="empty">No near-miss queries in this window.</div>}
+        </div>
+      ) : (
+        <div style="padding:22px">
+          <div class="locked">
+            <div class="locked-title">Needs Search Console</div>
+            <div class="locked-body">
+              The crawl can tell you what exists on your site. Only Google can tell you what it earns —
+              which pages get impressions, at what position, for which queries.
+            </div>
+            <a class="btn btn-primary btn-sm" style="margin-top:14px" href={`/settings?site=${site.id}`}>Connect it</a>
+          </div>
+        </div>
+      )}
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Top pages</div>
+          <div class="card-sub">{hasGsc ? 'By impressions' : 'Needs Search Console'}</div>
+        </div>
+        <a class="btn btn-sm" href={`/pages?site=${site.id}`}>All pages</a>
+      </div>
+      {hasGsc ? (
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Page</th><th class="num">Impr.</th><th class="num">Clicks</th><th class="num">Pos.</th></tr></thead>
+            <tbody>
+              {topPages.map((p) => (
+                <tr class="clickable" onclick={`location.href='/pages/${p.id}?site=${site.id}'`}>
+                  <td><span class="mono" style="color:var(--blue)">{p.url}</span></td>
+                  <td class="num">{compact(p.impressions)}</td>
+                  <td class="num">{p.clicks}</td>
+                  <td class="num">{pos(p.position)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {topPages.length === 0 && <div class="empty">No pages with impressions yet.</div>}
+        </div>
+      ) : (
+        <div style="padding:22px">
+          <div class="locked">
+            <div class="locked-title">Not measured yet</div>
+            <div class="locked-body">Connect Search Console to rank your pages by what they actually earn.</div>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+</App>

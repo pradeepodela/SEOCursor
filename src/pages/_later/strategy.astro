@@ -1,0 +1,103 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [strategy, clusters, opps] = await Promise.all([
+  db.strategy.findUnique({ where: { siteId: site.id } }),
+  db.strategyCluster.findMany({ where: { siteId: site.id }, orderBy: { priority: 'asc' } }),
+  db.opportunity.count({ where: { siteId: site.id, status: 'PLANNED' } }),
+]);
+
+const position = (strategy?.currentPosition as string[]) ?? [];
+const growth = (strategy?.growthAreas as { name: string; rationale: string }[]) ?? [];
+const covered = clusters.reduce((n, c) => n + c.covered, 0);
+const total = clusters.reduce((n, c) => n + c.total, 0);
+---
+<App active="strategy" title="SEO Strategy">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Your SEO Strategy</h1>
+      <p class="sub">Generated from your crawl, rankings and competitors. Updated when the data moves.</p>
+    </div>
+    <button class="btn btn-ai" data-ask="Generate a 30-day content plan">
+      <Icon name="sparkle" size={14} />Generate 30-day plan
+    </button>
+  </div>
+
+  {strategy && (
+    <div class="card" style="margin-bottom:18px">
+      <div style="padding:22px 24px">
+        <div class="insight-tag"><Icon name="sparkle" size={11} />The call</div>
+        <h2 style="font-size:20px;font-weight:640;letter-spacing:-.02em;margin:6px 0 12px;line-height:1.35">{strategy.headline}</h2>
+        <p style="font-size:14.5px;line-height:1.7;color:var(--ink-2);margin:0;max-width:760px">{strategy.summary}</p>
+      </div>
+    </div>
+  )}
+
+  <div class="grid home-split" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);margin-bottom:18px">
+    <div class="card">
+      <div class="card-head"><div class="card-title">Current position</div></div>
+      <div style="padding:6px 0">
+        {position.map((p) => (
+          <div style="display:flex;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line-2);font-size:13.5px;line-height:1.55;color:var(--ink-2)">
+            <span style="color:var(--ink-4);flex:0 0 auto">·</span><span>{p}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="card-title">Primary growth areas</div></div>
+      <div style="padding:6px 0">
+        {growth.map((g, i) => (
+          <div style="display:flex;gap:11px;padding:11px 18px;border-bottom:1px solid var(--line-2)">
+            <span class="opp-rank">{i + 1}</span>
+            <div>
+              <div style="font-size:13.5px;font-weight:580">{g.name}</div>
+              <div style="font-size:12.5px;color:var(--ink-3);margin-top:3px;line-height:1.5">{g.rationale}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Recommended content clusters</div>
+        <div class="card-sub">{covered} of {total} topics covered · {opps} open opportunities feed these</div>
+      </div>
+      <a class="btn btn-sm" href={`/calendar?site=${site.id}`}>See the calendar</a>
+    </div>
+    <div style="padding:16px 20px">
+      {clusters.map((c) => (
+        <div style="margin-bottom:22px">
+          <div class="row" style="margin-bottom:9px">
+            <span style="font-size:14px;font-weight:620;letter-spacing:-.012em">{c.pillar}</span>
+            <span class={`badge ${c.covered === 0 ? 'red' : c.covered === c.total ? 'green' : 'amber'}`}>{c.covered}/{c.total} covered</span>
+            {c.priority <= 2 && <span class="badge blue">Priority {c.priority}</span>}
+          </div>
+          <div style="padding-left:8px;border-left:2px solid var(--line)">
+            {c.children.map((child, i) => {
+              const done = i < c.covered;
+              return (
+                <div style="display:flex;align-items:center;gap:9px;padding:5px 0 5px 12px;font-size:13px">
+                  <span class="dot" style={`background:${done ? 'var(--green)' : 'var(--line-strong)'}`}></span>
+                  <span style={done ? 'color:var(--ink-2)' : 'color:var(--ink-3)'}>{child}</span>
+                  {!done && <span class="badge gray" style="font-size:10px">Gap</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</App>

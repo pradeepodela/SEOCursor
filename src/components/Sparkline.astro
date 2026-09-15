@@ -1,0 +1,18 @@
+---
+import { sparkPath } from '../lib/format';
+interface Props { values: number[]; color?: string; w?: number; h?: number; }
+const { values, color = 'var(--blue)', w = 78, h = 26 } = Astro.props;
+const d = sparkPath(values, w, h);
+const id = 'sp' + Math.random().toString(36).slice(2, 8);
+const area = d ? `${d} L${w},${h} L0,${h} Z` : '';
+---
+<svg class="kpi-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
+  <defs>
+    <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color={color} stop-opacity="0.20" />
+      <stop offset="100%" stop-color={color} stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <path d={area} fill={`url(#${id})`} />
+  <path d={d} fill="none" stroke={color} stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+</svg>

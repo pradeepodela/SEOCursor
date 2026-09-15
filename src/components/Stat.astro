@@ -1,0 +1,8 @@
+---
+interface Props { k: string; v: string; tone?: string; }
+const { k, v, tone } = Astro.props;
+---
+<div>
+  <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-4)">{k}</div>
+  <div style={`font-size:16px;font-weight:620;letter-spacing:-.015em;margin-top:1px;font-variant-numeric:tabular-nums${tone ? `;color:${tone}` : ''}`}>{v}</div>
+</div>

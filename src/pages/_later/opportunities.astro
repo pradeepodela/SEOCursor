@@ -1,0 +1,48 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import OpportunityBoard from '../islands/OpportunityBoard';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const opps = await db.opportunity.findMany({
+  where: { siteId: site.id, status: { not: 'DISMISSED' } },
+  orderBy: [{ status: 'asc' }, { rank: 'asc' }],
+});
+const oppsJson = opps.map((o) => ({ ...o, reasoning: o.reasoning as any }));
+
+const highImpact = opps.filter((o) => o.impact === 'HIGH').length;
+const quickWins = opps.filter((o) => o.quickWin).length;
+const totalVolume = opps.reduce((n, o) => n + (o.searchVolume ?? 0), 0);
+---
+<App active="opportunities" title="Opportunities">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Opportunities</h1>
+      <p class="sub">Your SEO backlog. Every insight here is something you can act on.</p>
+    </div>
+    <button class="btn btn-ai" data-ask="What should we work on this week?">
+      <Icon name="sparkle" size={14} />Ask what to do first
+    </button>
+  </div>
+
+  <div class="meta-grid" style="margin-bottom:18px;max-width:640px">
+    <div class="meta-cell"><div class="meta-k">Open</div><div class="meta-v">{opps.length}</div></div>
+    <div class="meta-cell"><div class="meta-k">High impact</div><div class="meta-v" style="color:var(--red)">{highImpact}</div></div>
+    <div class="meta-cell"><div class="meta-k">Quick wins</div><div class="meta-v" style="color:var(--green)">{quickWins}</div></div>
+    <div class="meta-cell"><div class="meta-k">Search demand</div><div class="meta-v">{(totalVolume / 1000).toFixed(1)}K/mo</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Backlog</div>
+        <div class="card-sub">Click any item to see how the recommendation was reached.</div>
+      </div>
+    </div>
+    <OpportunityBoard client:load opps={oppsJson} siteId={site.id} showFilters />
+  </div>
+</App>

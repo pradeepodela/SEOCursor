@@ -1,0 +1,30 @@
+---
+import App from '../layouts/App.astro';
+import Studio from '../islands/Studio';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { mdToHtml } from '../lib/generate';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [rows, wp] = await Promise.all([
+  db.contentPiece.findMany({ where: { siteId: site.id }, orderBy: { updatedAt: 'desc' } }),
+  db.wordPressConnection.findUnique({ where: { siteId: site.id } }),
+]);
+
+const docs = rows.map((r) => ({
+  id: r.id, title: r.title, slug: r.slug, status: r.status, body: r.body,
+  html: mdToHtml(r.body), wordCount: r.wordCount, seoScore: r.seoScore,
+  targetKeyword: r.targetKeyword, excerpt: r.excerpt,
+  model: r.model, costUsd: r.costUsd,
+  wpUrl: r.wpUrl, wpPostId: r.wpPostId, wpStatus: r.wpStatus, publishError: r.publishError,
+  publishedAt: r.publishedAt?.toISOString() ?? null,
+  createdAt: r.createdAt.toISOString(),
+}));
+
+const initialDoc = Astro.url.searchParams.get('doc') ?? undefined;
+---
+<App active="studio" title="Content Studio" wide>
+  <Studio client:load docs={docs} siteId={site.id} wpReady={!!wp} initialDoc={initialDoc} />
+</App>

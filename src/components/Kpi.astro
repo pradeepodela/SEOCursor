@@ -1,0 +1,25 @@
+---
+import Icon from './Icon.astro';
+import Sparkline from './Sparkline.astro';
+interface Props {
+  label: string; value: string; delta: number; values: number[];
+  note?: string; lowerIsBetter?: boolean; color?: string;
+}
+const { label, value, delta, values, note, lowerIsBetter = false, color = 'var(--blue)' } = Astro.props;
+const isGood = lowerIsBetter ? delta < 0 : delta > 0;
+const dir = delta > 0 ? 'arrowUp' : delta < 0 ? 'arrowDown' : 'minus';
+---
+<div class="kpi anim-up">
+  <div class="kpi-label">{label}</div>
+  <div class="kpi-val">{value}</div>
+  <div class="kpi-foot">
+    <div>
+      <span class={`delta ${isGood ? 'up' : 'down'}`}>
+        <Icon name={dir} size={12} />
+        {Math.abs(Math.round(delta))}%
+      </span>
+      {note && <div class="kpi-note">{note}</div>}
+    </div>
+    <Sparkline values={values} color={isGood ? 'var(--green)' : color} />
+  </div>
+</div>

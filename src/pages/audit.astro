@@ -1,0 +1,68 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import HealthGauge from '../components/HealthGauge.astro';
+import AuditBoard from '../islands/AuditBoard';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { scoreColor, relDate } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [issues, lastCrawl, passedCount] = await Promise.all([
+  db.auditIssue.findMany({ where: { siteId: site.id }, orderBy: [{ severity: 'asc' }, { affectedCount: 'desc' }] }),
+  db.crawlJob.findFirst({ where: { siteId: site.id, status: 'DONE' }, orderBy: { startedAt: 'desc' } }),
+  db.page.count({ where: { siteId: site.id, crawledAt: { not: null }, health: 'GOOD' } }),
+]);
+
+const bars = [
+  { name: 'Technical SEO', v: site.technicalScore },
+  { name: 'On-page SEO', v: site.onPageScore },
+  { name: 'Content', v: site.contentScore },
+  { name: 'Backlinks', v: site.backlinkScore },
+  { name: 'User Experience', v: site.uxScore },
+];
+---
+<App active="audit" title="SEO Audit">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">SEO Audit</h1>
+      <p class="sub">
+        {site.lastCrawlAt
+          ? `${site.indexedPages} pages crawled ${relDate(site.lastCrawlAt, new Date())} · ${lastCrawl?.linksChecked ?? 0} links checked · every finding below was measured`
+          : 'No crawl yet — run one from Settings'}
+      </p>
+    </div>
+    <a class="btn" href={`/settings?site=${site.id}`}><Icon name="refresh" size={13} />Re-crawl</a>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="health-wrap">
+      <HealthGauge score={site.healthScore} size={104} />
+      <div class="bars">
+        {bars.map((b, i) => (
+          <div>
+            <div class="bar-row">
+              <span class="bar-name">{b.name}</span>
+              <span class="bar-val" style={`color:${scoreColor(b.v)}`}>{b.v}</span>
+            </div>
+            <div class="bar-track">
+              <div class="bar-fill" style={`width:${b.v}%;background:${scoreColor(b.v)};animation-delay:${i * 70}ms`}></div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style="flex:0 0 240px;border-left:1px solid var(--line-2);padding-left:20px">
+        <div class="insight-tag"><Icon name="sparkle" size={11} />What this means</div>
+        <div style="font-size:12.8px;color:var(--ink-2);line-height:1.6">
+          Scores are derived from the crawl: what share of pages carry each defect. Backlink authority is not
+          included because a crawl cannot observe it.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <AuditBoard client:load issues={issues} siteId={site.id} passed={passedCount} />
+
+</App>

@@ -1,0 +1,89 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import IdeaBoard from '../islands/IdeaBoard';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { llmConfigured } from '../lib/llm';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [rows, gsc, wp] = await Promise.all([
+  db.blogIdea.findMany({
+    where: { siteId: site.id },
+    include: { calendarItem: true, content: true },
+    orderBy: [{ status: 'asc' }, { score: 'desc' }, { createdAt: 'desc' }],
+  }),
+  db.gscConnection.findUnique({ where: { siteId: site.id } }),
+  db.wordPressConnection.findUnique({ where: { siteId: site.id } }),
+]);
+
+const ideas = rows.map((i) => ({
+  id: i.id, title: i.title, angle: i.angle, targetQuery: i.targetQuery,
+  rationale: i.rationale, evidence: (i.evidence as any) ?? [],
+  source: i.source, score: i.score,
+  impressions: i.impressions, clicks: i.clicks, position: i.position,
+  status: i.status, createdBy: i.createdBy,
+  scheduledFor: i.calendarItem?.date?.toISOString() ?? null,
+  autoGenerate: i.calendarItem?.autoGenerate ?? true,
+  autoPublish: i.calendarItem?.autoPublish ?? false,
+  contentId: i.content?.id ?? null,
+  contentWords: i.content?.wordCount ?? null,
+  wpUrl: i.content?.wpUrl ?? null,
+  runError: i.calendarItem?.runError ?? null,
+}));
+
+const hasGsc = !!gsc?.propertyUrl && !!gsc.lastSyncAt;
+const llmReady = llmConfigured();
+const crawled = !!site.lastCrawlAt;
+---
+<App active="ideas" title="Blog Ideas">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Blog ideas</h1>
+      <p class="sub">
+        Titles worth writing for {site.domain}, each tied to something measured on your site.
+      </p>
+    </div>
+    <a class="btn" href={`/calendar?site=${site.id}`}><Icon name="calendar" size={13} />Calendar</a>
+  </div>
+
+  {!crawled ? (
+    <div class="locked" style="padding:44px 22px">
+      <div class="locked-title">Crawl the site first</div>
+      <div class="locked-body">
+        Ideas are generated from your actual pages and search data. Without a crawl there is nothing
+        to reason from, and anything suggested would be guesswork.
+      </div>
+      <a class="btn btn-primary" style="margin-top:16px" href={`/settings?site=${site.id}`}>Run a crawl</a>
+    </div>
+  ) : (
+    <>
+      {!hasGsc && (
+        <div class="card" style="margin-bottom:18px">
+          <div class="insight" style="margin:16px 18px;background:linear-gradient(180deg,#fdf9f2,#fdf6ec);border-color:var(--amber-line)">
+            <div class="insight-tag" style="color:var(--amber)"><Icon name="info" size={11} />Working without demand data</div>
+            <div class="insight-body">
+              Search Console is not connected, so suggestions come from your page content alone — the model
+              can see what you cover but not what people actually search for.
+              <strong> Connect it and the same button produces far better titles</strong>, because it can
+              target queries you already rank badly for.
+              <a href={`/settings?site=${site.id}`} style="color:var(--blue);margin-left:4px">Connect →</a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <IdeaBoard
+        client:load
+        ideas={ideas}
+        siteId={site.id}
+        llmReady={llmReady}
+        wpReady={!!wp}
+        hasGsc={hasGsc}
+        ideaModel={site.ideaModel}
+      />
+    </>
+  )}
+</App>

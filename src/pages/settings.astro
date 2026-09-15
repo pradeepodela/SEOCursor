@@ -1,0 +1,269 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import GscPanel from '../islands/GscPanel';
+import WpPanel from '../islands/WpPanel';
+import ModelPanel from '../islands/ModelPanel';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { isConfigured, googleConfig } from '../lib/google';
+import { llmConfigured, verifyAll, liveModels } from '../lib/llm';
+import { relDate } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [competitors, conn, lastCrawl, wp] = await Promise.all([
+  db.competitor.findMany({ where: { siteId: site.id }, orderBy: { label: 'asc' } }),
+  db.gscConnection.findUnique({ where: { siteId: site.id } }),
+  db.crawlJob.findFirst({ where: { siteId: site.id }, orderBy: { startedAt: 'desc' } }),
+  db.wordPressConnection.findUnique({ where: { siteId: site.id } }),
+]);
+
+const providerStatus = await verifyAll();
+
+const modelState = {
+  providers: providerStatus,
+  anyReady: providerStatus.some((p) => p.ok),
+  ideaModel: site.ideaModel,
+  draftModel: site.draftModel,
+  choices: (await liveModels()).map((c) => ({ id: c.id, provider: c.provider, label: c.label, note: c.note, tier: c.tier })),
+};
+
+const wpState = {
+  connected: !!wp,
+  baseUrl: wp?.baseUrl ?? null,
+  username: wp?.username ?? null,
+  defaultStatus: wp?.defaultStatus ?? 'draft',
+  verifiedAt: wp?.verifiedAt?.toISOString() ?? null,
+  lastError: wp?.lastError ?? null,
+};
+
+const gscState = {
+  configured: isConfigured(),
+  connected: !!conn,
+  googleEmail: conn?.googleEmail ?? null,
+  propertyUrl: conn?.propertyUrl ?? null,
+  properties: conn?.properties ?? [],
+  lastSyncAt: conn?.lastSyncAt?.toISOString() ?? null,
+  syncError: conn?.syncError ?? null,
+  redirectUri: googleConfig()?.redirectUri ?? 'http://localhost:4330/api/google/callback',
+};
+
+const notice = Astro.url.searchParams.get('gsc');
+---
+<App active="settings" title="Settings">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Settings</h1>
+      <p class="sub">Workspace configuration for {site.domain}</p>
+    </div>
+  </div>
+
+  {notice === 'connected' && (
+    <div class="card" style="margin-bottom:18px;border-color:var(--green-line);background:var(--green-soft)">
+      <div style="padding:13px 18px;display:flex;align-items:center;gap:9px;font-size:13px;color:#14532d">
+        <Icon name="checkCircle" size={15} />
+        <span><strong>Search Console connected.</strong> Sync the data below to see which pages rank.</span>
+      </div>
+    </div>
+  )}
+  {notice === 'no_property' && (
+    <div class="card" style="margin-bottom:18px;border-color:var(--amber-line);background:var(--amber-soft)">
+      <div style="padding:13px 18px;display:flex;align-items:center;gap:9px;font-size:13px;color:#92400e">
+        <Icon name="alert" size={15} />
+        <span>Connected, but no property matched <strong>{site.domain}</strong>. Pick one below, or verify the site in Search Console first.</span>
+      </div>
+    </div>
+  )}
+
+  <div class="grid home-split" style="grid-template-columns:minmax(0,1fr) 340px;align-items:start">
+    <div class="col" style="gap:18px">
+      <ModelPanel client:load siteId={site.id} state={modelState} />
+
+      <WpPanel client:load siteId={site.id} state={wpState} />
+
+      <GscPanel client:load siteId={site.id} state={gscState} notice={notice} />
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Crawl</div>
+            <div class="card-sub">
+              {site.lastCrawlAt
+                ? `Last crawled ${relDate(site.lastCrawlAt, new Date())} · ${site.indexedPages} pages · ${site.renderMode === 'browser' ? 'headless browser' : 'HTTP'}`
+                : 'Never crawled'}
+            </div>
+          </div>
+          <button class="btn btn-sm" id="recrawl"><Icon name="refresh" size={12} />Re-crawl</button>
+        </div>
+        <div style="padding:16px 18px">
+          <div class="field">
+            <label class="field-label">Page limit</label>
+            <select class="input" id="pageCap">
+              {[25, 100, 250, 500].map((n) => (
+                <option value={n} selected={site.crawlPageCap === n}>{n} pages</option>
+              ))}
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12.5px">
+            <div>
+              <div class="meta-k">robots.txt</div>
+              <div style="margin-top:3px;color:var(--ink-2)">{site.robotsTxtUrl ? 'Found' : 'Not found'}</div>
+            </div>
+            <div>
+              <div class="meta-k">Sitemap</div>
+              <div style="margin-top:3px;color:var(--ink-2)">{site.sitemapUrls.length ? `${site.sitemapUrls.length} found` : 'Not found'}</div>
+            </div>
+          </div>
+          {lastCrawl?.error && (
+            <div style="margin-top:14px;padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;font-size:12.5px;color:#92400e">
+              {lastCrawl.error}
+            </div>
+          )}
+          <div id="crawlProgress" hidden style="margin-top:14px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Website</div>
+        </div>
+        <div style="padding:16px 18px">
+          <div class="field">
+            <label class="field-label">Domain</label>
+            <input class="input mono" value={site.domain} readonly />
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label class="field-label">Start URL</label>
+            <input class="input mono" value={site.url} readonly />
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Competitors</div>
+          <div class="card-sub">{competitors.length} tracked</div>
+        </div>
+        <div style="padding:4px 0">
+          {competitors.map((c) => (
+            <div style="display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line-2)">
+              <span class="comp-av" style={`background:${c.color};margin:0`}>{c.label}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:550">{c.domain}</div>
+                <div style="font-size:11.5px;color:var(--ink-3)">Not yet analysed</div>
+              </div>
+            </div>
+          ))}
+          {competitors.length === 0 && <div class="empty" style="padding:24px">No competitors added.</div>}
+        </div>
+      </div>
+    </div>
+
+    <div class="col" style="gap:18px">
+      <div class="card">
+        <div class="card-head"><div class="card-title">Data sources</div></div>
+        <div style="padding:4px 0">
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line-2)">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:550">Site crawl</div>
+              <div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">Pages, links, on-page elements</div>
+            </div>
+            <span class={`badge ${site.lastCrawlAt ? 'green' : 'gray'}`}>{site.lastCrawlAt ? 'Active' : 'Never run'}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line-2)">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:550">Google Search Console</div>
+              <div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">Impressions, clicks, positions</div>
+            </div>
+            <span class={`badge ${conn ? 'green' : 'gray'}`}>{conn ? 'Connected' : 'Not connected'}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line-2)">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:550">AI models</div>
+              <div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">
+                {providerStatus.filter((p) => p.ok).map((p) => p.label).join(', ') || 'Generates titles and writes drafts'}
+              </div>
+            </div>
+            <span class={`badge ${modelState.anyReady ? 'green' : 'gray'}`}>
+              {modelState.anyReady ? 'Ready' : 'No key'}
+            </span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line-2)">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:550">WordPress</div>
+              <div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">Publishing destination</div>
+            </div>
+            <span class={`badge ${wp ? 'green' : 'gray'}`}>{wp ? 'Connected' : 'Not connected'}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 18px">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:550">Keyword provider</div>
+              <div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">Search volume and difficulty</div>
+            </div>
+            <span class="badge gray">Later step</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="card-title">What each source gives you</div></div>
+        <div style="padding:14px 18px;font-size:12.5px;color:var(--ink-2);line-height:1.65">
+          <p style="margin:0 0 10px">
+            The <strong>crawl</strong> sees what exists — every page, every link, every missing tag. It is complete
+            but blind to performance.
+          </p>
+          <p style="margin:0 0 10px">
+            <strong>Search Console</strong> sees what earns — which URLs get impressions, at what position, for
+            which queries. It is the only honest source for that, and it is free.
+          </p>
+          <p style="margin:0">
+            Together they answer the question that matters: which of your existing pages are close enough to
+            page one to be worth the effort.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script define:vars={{ siteId: site.id }}>
+    const btn = document.getElementById('recrawl');
+    const box = document.getElementById('crawlProgress');
+
+    btn?.addEventListener('click', async () => {
+      const maxPages = Number(document.getElementById('pageCap').value);
+      btn.disabled = true;
+      box.hidden = false;
+      box.innerHTML = '<div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink-3)"><span class="spinner"></span><span>Starting…</span></div>';
+
+      const res = await fetch('/api/crawl', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ siteId, maxPages }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        box.innerHTML = `<div style="font-size:12.5px;color:var(--red)">${json.error}</div>`;
+        btn.disabled = false;
+        return;
+      }
+
+      const poll = setInterval(async () => {
+        const r = await fetch(`/api/crawl/${json.data.id}`).then((x) => x.json()).catch(() => null);
+        if (!r?.ok) return;
+        const d = r.data;
+        if (d.status === 'DONE') {
+          clearInterval(poll);
+          box.innerHTML = `<div style="font-size:12.5px;color:var(--green)">✓ ${d.summary.pages} pages · ${d.summary.issues} findings · ${d.summary.brokenLinks} broken links</div>`;
+          setTimeout(() => window.location.reload(), 1200);
+        } else if (d.status === 'FAILED') {
+          clearInterval(poll);
+          box.innerHTML = `<div style="font-size:12.5px;color:var(--red)">${d.error ?? 'Crawl failed'}</div>`;
+          btn.disabled = false;
+        } else {
+          box.innerHTML = `<div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink-3)"><span class="spinner"></span><span>${d.phase}</span></div>`;
+        }
+      }, 900);
+    });
+  </script>
+</App>

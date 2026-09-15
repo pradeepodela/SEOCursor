@@ -1,0 +1,39 @@
+---
+import App from '../layouts/App.astro';
+import Studio from '../islands/Studio';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { mdToHtml } from '../lib/generate';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const rows = await db.contentPiece.findMany({
+  where: { siteId: site.id },
+  include: { brief: true },
+  orderBy: [{ updatedAt: 'desc' }],
+});
+
+const docs = rows.map((r) => ({
+  id: r.id, title: r.title, slug: r.slug, status: r.status, body: r.body,
+  html: mdToHtml(r.body), wordCount: r.wordCount, seoScore: r.seoScore,
+  targetKeyword: r.targetKeyword, excerpt: r.excerpt,
+  scheduledFor: r.scheduledFor?.toISOString() ?? null,
+  publishedAt: r.publishedAt?.toISOString() ?? null,
+  brief: r.brief
+    ? {
+        id: r.brief.id, targetKeyword: r.brief.targetKeyword, intent: r.brief.intent,
+        recommendedUrl: r.brief.recommendedUrl, suggestedTitle: r.brief.suggestedTitle,
+        metaDesc: r.brief.metaDesc, searchVolume: r.brief.searchVolume, difficulty: r.brief.difficulty,
+        targetWords: r.brief.targetWords, outline: r.brief.outline as any,
+        entities: r.brief.entities, internalLinks: r.brief.internalLinks,
+        competitors: r.brief.competitors, questions: r.brief.questions,
+      }
+    : null,
+}));
+
+const initialDoc = Astro.url.searchParams.get('doc') ?? undefined;
+---
+<App active="studio" title="Content Studio" wide>
+  <Studio client:load docs={docs} siteId={site.id} initialDoc={initialDoc} />
+</App>

@@ -1,0 +1,68 @@
+---
+import '../styles/global.css';
+import '../styles/components.css';
+import Rail from '../components/Rail.astro';
+import Topbar from '../components/Topbar.astro';
+import { db } from '../lib/db';
+import { resolveSite, navCounts } from '../lib/site';
+import { startScheduler } from '../lib/scheduler';
+
+startScheduler();
+
+interface Props { active: string; title: string; wide?: boolean; }
+const { active, title, wide = false } = Astro.props;
+
+const { sites, site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [competitors, counts, gsc] = await Promise.all([
+  db.competitor.findMany({ where: { siteId: site.id }, orderBy: { label: 'asc' } }),
+  navCounts(site.id),
+  db.gscConnection.findUnique({ where: { siteId: site.id }, select: { propertyUrl: true } }),
+]);
+const gscConnected = !!gsc?.propertyUrl;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title} · SEO Cursor</title>
+  <meta name="description" content="An AI-native SEO workspace. Your website is the project, SEO is the codebase, the agent is the developer." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232563eb'/><text y='70' x='50' text-anchor='middle' font-size='58' font-family='system-ui' font-weight='700' fill='white'>S</text></svg>" />
+</head>
+<body>
+  <div class="shell">
+    <Rail active={active} counts={counts} siteId={site.id} gscConnected={gscConnected} />
+    <div class="main">
+      <Topbar site={site} sites={sites} competitors={competitors} />
+      <div class="body-scroll">
+        <main class={wide ? 'canvas wide' : 'canvas'}>
+          <slot />
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Dropdowns — one open at a time, click-outside and Escape close.
+    const closeAll = () => document.querySelectorAll('[data-dd-panel]').forEach((p) => p.setAttribute('hidden', ''));
+    document.querySelectorAll('[data-dropdown]').forEach((wrap) => {
+      const trigger = wrap.querySelector('[data-dd-trigger]');
+      const panel = wrap.querySelector('[data-dd-panel]');
+      trigger?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wasOpen = !panel?.hasAttribute('hidden');
+        closeAll();
+        if (!wasOpen) panel?.removeAttribute('hidden');
+      });
+      panel?.addEventListener('click', (e) => e.stopPropagation());
+    });
+    document.addEventListener('click', closeAll);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeAll();
+    });
+
+  </script>
+</body>
+</html>

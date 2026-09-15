@@ -1,0 +1,138 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const view = Astro.url.searchParams.get('v') ?? 'broken';
+
+const [broken, unverified, redirects, counts] = await Promise.all([
+  db.link.findMany({ where: { siteId: site.id, verdict: 'broken' }, orderBy: [{ isInternal: 'desc' }], take: 300 }),
+  db.link.findMany({ where: { siteId: site.id, verdict: { in: ['blocked', 'unreachable'] } }, take: 300 }),
+  db.link.findMany({ where: { siteId: site.id, isInternal: true, redirectTo: { not: null } }, take: 300 }),
+  db.link.groupBy({ by: ['verdict'], where: { siteId: site.id }, _count: true }),
+]);
+
+const total = counts.reduce((n, c) => n + c._count, 0);
+const okCount = counts.find((c) => c.verdict === 'ok')?._count ?? 0;
+
+// Collapse by target so one dead URL linked 40 times is one row, not forty.
+const groupBy = (rows: typeof broken) => {
+  const map = new Map<string, { to: string; status: number | null; error: string | null; redirectTo: string | null; internal: boolean; from: string[] }>();
+  for (const r of rows) {
+    const e = map.get(r.toUrl) ?? { to: r.toUrl, status: r.statusCode, error: r.error, redirectTo: r.redirectTo, internal: r.isInternal, from: [] };
+    if (!e.from.includes(r.fromUrl)) e.from.push(r.fromUrl);
+    map.set(r.toUrl, e);
+  }
+  return [...map.values()].sort((a, b) => b.from.length - a.from.length);
+};
+
+const rows = groupBy(view === 'broken' ? broken : view === 'unverified' ? unverified : redirects);
+
+const VIEWS = [
+  { key: 'broken', label: 'Broken', n: broken.length, tone: 'red' },
+  { key: 'redirects', label: 'Links to redirects', n: redirects.length, tone: 'amber' },
+  { key: 'unverified', label: 'Could not verify', n: unverified.length, tone: 'gray' },
+];
+---
+<App active="links" title="Links">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Links</h1>
+      <p class="sub">{compact(total)} links found · {compact(okCount)} resolved cleanly</p>
+    </div>
+    <a class="btn" href={`/settings?site=${site.id}`}><Icon name="refresh" size={13} />Re-crawl</a>
+  </div>
+
+  {total === 0 ? (
+    <div class="locked" style="padding:44px 22px">
+      <div class="locked-title">No link data yet</div>
+      <div class="locked-body">Run a crawl and every link on the site gets followed and checked.</div>
+      <a class="btn btn-primary" style="margin-top:16px" href={`/settings?site=${site.id}`}>Run a crawl</a>
+    </div>
+  ) : (
+    <>
+      <div class="filters" style="margin-bottom:16px">
+        {VIEWS.map((v) => (
+          <a class={`filter ${view === v.key ? 'on' : ''}`} href={`/links?site=${site.id}&v=${v.key}`}>
+            {v.label}<span class="filter-n">{v.n}</span>
+          </a>
+        ))}
+      </div>
+
+      {view === 'unverified' && (
+        <div class="card" style="margin-bottom:18px">
+          <div class="insight" style="margin:16px 18px;background:linear-gradient(180deg,#fbfcfd,#f7f8fa);border-color:var(--line)">
+            <div class="insight-tag" style="color:var(--ink-3)"><Icon name="info" size={11} />Not broken</div>
+            <div class="insight-body">
+              These answered with bot protection (401, 403, 429) or did not respond to us. That usually means
+              the link works fine for a human visitor. <strong>We deliberately do not count them as broken</strong> —
+              an audit that cries wolf is worse than one that says "check this yourself".
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === 'redirects' && (
+        <div class="card" style="margin-bottom:18px">
+          <div class="insight" style="margin:16px 18px">
+            <div class="insight-tag"><Icon name="trending" size={11} />Why it matters</div>
+            <div class="insight-body">
+              Every one of these makes a visitor wait for an extra round trip and loses a little of the authority
+              the link passes. <strong>It is one of the cheapest fixes available</strong> — the destination already
+              exists, the link just points at the old address.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">{VIEWS.find((v) => v.key === view)?.label}</div>
+          <div class="card-sub">{rows.length} unique {rows.length === 1 ? 'target' : 'targets'}</div>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Target</th>
+                <th style="width:90px">{view === 'redirects' ? 'Goes to' : 'Status'}</th>
+                <th style="width:80px" class="num">Links</th>
+                <th>Linked from</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr>
+                  <td>
+                    <div class="mono" style="font-size:12px;word-break:break-all;max-width:360px">{r.to}</div>
+                    <span class={`badge ${r.internal ? 'blue' : 'gray'}`} style="margin-top:4px">{r.internal ? 'Internal' : 'External'}</span>
+                  </td>
+                  <td>
+                    {view === 'redirects'
+                      ? <span class="mono" style="font-size:11.5px;color:var(--green);word-break:break-all">{r.redirectTo}</span>
+                      : <span class={`badge ${view === 'broken' ? 'red' : 'gray'}`}>{r.status || r.error || '—'}</span>}
+                  </td>
+                  <td class="num">{r.from.length}</td>
+                  <td>
+                    <div class="mono" style="font-size:11.5px;color:var(--ink-3);word-break:break-all;max-width:320px">
+                      {r.from.slice(0, 2).join('\n')}
+                      {r.from.length > 2 && <div style="color:var(--ink-4)">+{r.from.length - 2} more pages</div>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 && (
+            <div class="empty"><div class="empty-icon">✓</div>Nothing here — good.</div>
+          )}
+        </div>
+      </div>
+    </>
+  )}
+</App>

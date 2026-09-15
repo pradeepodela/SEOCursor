@@ -1,0 +1,58 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import HealthGauge from '../components/HealthGauge.astro';
+import Stat from '../components/Stat.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact } from '../lib/format';
+
+const { sites, site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const enriched = await Promise.all(
+  sites.map(async (s) => ({
+    site: s,
+    pages: await db.page.count({ where: { siteId: s.id } }),
+    opps: await db.opportunity.count({ where: { siteId: s.id, status: 'PLANNED' } }),
+    comps: await db.competitor.count({ where: { siteId: s.id } }),
+  })),
+);
+---
+<App active="websites" title="Websites">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Websites</h1>
+      <p class="sub">Every workspace you have connected. Each one has its own crawl, strategy and calendar.</p>
+    </div>
+    <a class="btn btn-primary" href="/connect"><Icon name="plus" size={14} />Connect a website</a>
+  </div>
+
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
+    {enriched.map(({ site: s, pages, opps, comps }) => (
+      <div class="card" style={s.id === site.id ? 'border-color:var(--blue)' : ''}>
+        <div class="card-head">
+          <div class="row">
+            <span class="site-emoji" style="width:28px;height:28px;font-size:14px">{s.emoji}</span>
+            <div>
+              <div class="card-title">{s.domain}</div>
+              <div class="card-sub">{s.name}</div>
+            </div>
+          </div>
+          {s.id === site.id ? <span class="badge blue">Active</span> : <a class="btn btn-sm" href={`/?site=${s.id}`}>Switch</a>}
+        </div>
+        <div class="health-wrap" style="padding:16px 18px">
+          <HealthGauge score={s.healthScore} size={86} />
+          <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <Stat k="Traffic" v={compact(s.organicTraffic)} />
+            <Stat k="Keywords" v={compact(s.keywordCount)} />
+            <Stat k="Pages" v={String(pages)} />
+            <Stat k="Opportunities" v={String(opps)} />
+            <Stat k="Competitors" v={String(comps)} />
+            <Stat k="Issues" v={String(s.issueCount)} tone={s.issueCount > 15 ? 'var(--amber)' : undefined} />
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+</App>

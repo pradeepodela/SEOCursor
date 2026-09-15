@@ -1,0 +1,144 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+import { compact, pos } from '../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const [conn, keywords] = await Promise.all([
+  db.gscConnection.findUnique({ where: { siteId: site.id } }),
+  db.keyword.findMany({
+    where: { siteId: site.id },
+    include: { page: true },
+    orderBy: [{ impressions: 'desc' }],
+    take: 500,
+  }),
+]);
+
+const connected = !!conn?.propertyUrl && !!conn.lastSyncAt;
+const filter = Astro.url.searchParams.get('f') ?? 'all';
+
+const near = keywords.filter((k) => k.position !== null && k.position >= 8 && k.position <= 20);
+const top3 = keywords.filter((k) => k.position !== null && k.position < 4);
+const noClicks = keywords.filter((k) => k.clicks === 0 && k.impressions >= 50);
+
+const shown =
+  filter === 'near' ? near :
+  filter === 'top3' ? top3 :
+  filter === 'noclicks' ? noClicks :
+  keywords;
+
+const totalImpr = keywords.reduce((n, k) => n + k.impressions, 0);
+const totalClicks = keywords.reduce((n, k) => n + k.clicks, 0);
+const ctr = totalImpr ? ((totalClicks / totalImpr) * 100).toFixed(1) : '0';
+
+const FILTERS = [
+  { key: 'all', label: 'All', n: keywords.length },
+  { key: 'near', label: 'Page 2 — closest wins', n: near.length },
+  { key: 'noclicks', label: 'Impressions, no clicks', n: noClicks.length },
+  { key: 'top3', label: 'Top 3', n: top3.length },
+];
+---
+<App active="keywords" title="Keywords">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Keywords</h1>
+      <p class="sub">
+        {connected
+          ? `${keywords.length} queries from Search Console · last ${conn!.lastSyncAt ? new Date(conn!.lastSyncAt).toLocaleDateString() : ''} sync`
+          : 'Search Console is not connected'}
+      </p>
+    </div>
+    <a class="btn" href={`/settings?site=${site.id}`}><Icon name="refresh" size={13} />Sync</a>
+  </div>
+
+  {!connected ? (
+    <div class="locked" style="padding:44px 22px">
+      <div class="locked-title">Keyword data comes from Google</div>
+      <div class="locked-body">
+        We do not guess at this. Every query below will be one Google actually showed you for, with the real
+        impressions, clicks and average position attached. Connect Search Console to populate it.
+      </div>
+      <a class="btn btn-primary" style="margin-top:16px" href={`/settings?site=${site.id}`}>Connect Search Console</a>
+    </div>
+  ) : (
+    <>
+      <div class="meta-grid" style="margin-bottom:18px;max-width:640px">
+        <div class="meta-cell"><div class="meta-k">Queries</div><div class="meta-v">{compact(keywords.length)}</div></div>
+        <div class="meta-cell"><div class="meta-k">Impressions</div><div class="meta-v">{compact(totalImpr)}</div></div>
+        <div class="meta-cell"><div class="meta-k">Clicks</div><div class="meta-v">{compact(totalClicks)}</div></div>
+        <div class="meta-cell"><div class="meta-k">CTR</div><div class="meta-v">{ctr}%</div></div>
+      </div>
+
+      <div class="filters" style="margin-bottom:16px">
+        {FILTERS.map((f) => (
+          <a class={`filter ${filter === f.key ? 'on' : ''}`} href={`/keywords?site=${site.id}&f=${f.key}`}>
+            {f.label}<span class="filter-n">{f.n}</span>
+          </a>
+        ))}
+      </div>
+
+      {filter === 'near' && near.length > 0 && (
+        <div class="card" style="margin-bottom:18px">
+          <div class="insight" style="margin:16px 18px">
+            <div class="insight-tag"><Icon name="trending" size={11} />Why this filter</div>
+            <div class="insight-body">
+              These {near.length} queries already put you in front of people — {compact(near.reduce((n, k) => n + k.impressions, 0))} impressions —
+              but at a position almost nobody clicks. <strong>Moving an existing page from 12 to 7 is far cheaper than ranking a new one.</strong>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">{FILTERS.find((f) => f.key === filter)?.label}</div>
+          <div class="card-sub">{shown.length} shown</div>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Query</th><th class="num">Impressions</th><th class="num">Clicks</th>
+                <th class="num">CTR</th><th class="num">Position</th><th>Ranking page</th><th>Intent</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.slice(0, 250).map((k) => {
+                const kctr = k.impressions ? ((k.clicks / k.impressions) * 100).toFixed(1) : '0';
+                const p = k.position ?? 0;
+                return (
+                  <tr>
+                    <td style="font-weight:520;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{k.keyword}</td>
+                    <td class="num">{compact(k.impressions)}</td>
+                    <td class="num">{k.clicks}</td>
+                    <td class="num muted">{kctr}%</td>
+                    <td class="num">
+                      <span class={`badge ${p < 4 ? 'green' : p <= 10 ? 'blue' : p <= 20 ? 'amber' : 'gray'}`}>{pos(k.position)}</span>
+                    </td>
+                    <td>
+                      {k.page
+                        ? <a class="mono" style="color:var(--blue);font-size:12px" href={`/pages/${k.page.id}?site=${site.id}`}>{k.page.url}</a>
+                        : <span class="dim">not crawled</span>}
+                    </td>
+                    <td class="muted" style="font-size:12px">{k.intent[0] + k.intent.slice(1).toLowerCase()}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {shown.length === 0 && <div class="empty">Nothing in this filter.</div>}
+          {shown.length > 250 && <div style="padding:12px 18px;font-size:12px;color:var(--ink-4)">Showing the first 250 of {shown.length}.</div>}
+        </div>
+      </div>
+
+      <p style="font-size:11.5px;color:var(--ink-4);margin-top:14px;line-height:1.6;max-width:620px">
+        Search volume and keyword difficulty are not shown because Search Console does not report them — those
+        need a third-party keyword provider, which is a later step. Everything above is measured.
+      </p>
+    </>
+  )}
+</App>

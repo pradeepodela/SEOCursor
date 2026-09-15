@@ -1,0 +1,68 @@
+---
+import Icon from './Icon.astro';
+import type { Site, Competitor } from '@prisma/client';
+interface Props { site: Site; sites: Site[]; competitors: Competitor[]; }
+const { site, sites, competitors } = Astro.props;
+---
+<header class="topbar">
+  <div style="position:relative" data-dropdown>
+    <button class="site-pick" data-dd-trigger type="button">
+      <span class="site-emoji">{site.emoji}</span>
+      <span class="site-domain">{site.domain}</span>
+      <Icon name="chevronDown" size={13} class="caret" />
+    </button>
+    <div class="dd" data-dd-panel hidden>
+      <div class="dd-head">Workspaces</div>
+      {sites.map((s) => (
+        <a class={`dd-item ${s.id === site.id ? 'active' : ''}`} href={`/?site=${s.id}`}>
+          <span class="site-emoji">{s.emoji}</span>
+          <span style="flex:1">
+            <div style="font-weight:550">{s.domain}</div>
+            <div style="font-size:11.5px;color:var(--ink-3)">{s.name}</div>
+          </span>
+          {s.id === site.id && <Icon name="check" size={14} class="muted" />}
+        </a>
+      ))}
+      <div class="dd-sep"></div>
+      <a class="dd-item" href="/connect">
+        <Icon name="plus" size={14} class="muted" />
+        <span>Connect a website</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="comp-strip">
+    <span style="font-size:12.5px;color:var(--ink-3)">{competitors.length} competitors</span>
+    <div class="comp-avatars">
+      {competitors.map((c) => (
+        <span class="comp-av" style={`background:${c.color}`} title={`${c.name} — ${c.domain}`}>{c.label}</span>
+      ))}
+      <a class="comp-add" href="/competitors" title="Add competitor"><Icon name="plus" size={12} /></a>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <button class="date-pick" type="button">
+    <Icon name="calendar" size={13} class="muted" />
+    <span>Sep 1 – Sep 30, 2026</span>
+    <Icon name="chevronDown" size={12} class="caret" />
+  </button>
+
+  <div class="vsep"></div>
+
+  <div style="position:relative" data-dropdown>
+    <button class="avatar" data-dd-trigger type="button" title="Pradeep">P</button>
+    <div class="dd right" data-dd-panel hidden style="min-width:200px">
+      <div class="dd-head">Signed in</div>
+      <div style="padding:4px 9px 9px">
+        <div style="font-size:13px;font-weight:550">Pradeep</div>
+        <div style="font-size:11.5px;color:var(--ink-3)">Owner · {site.domain}</div>
+      </div>
+      <div class="dd-sep"></div>
+      <a class="dd-item" href="/settings"><Icon name="settings" size={14} class="muted" /><span>Settings</span></a>
+      <a class="dd-item" href="/mcp"><Icon name="database" size={14} class="muted" /><span>MCP server</span></a>
+      <a class="dd-item" href="/connect"><Icon name="plus" size={14} class="muted" /><span>Connect a website</span></a>
+    </div>
+  </div>
+</header>

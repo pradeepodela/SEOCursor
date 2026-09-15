@@ -1,0 +1,27 @@
+---
+import App from '../layouts/App.astro';
+import Icon from '../components/Icon.astro';
+import CalendarBoard from '../islands/CalendarBoard';
+import { db } from '../lib/db';
+import { resolveSite } from '../lib/site';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const rows = await db.calendarItem.findMany({ where: { siteId: site.id }, orderBy: { date: 'asc' } });
+const items = rows.map((r) => ({ ...r, date: r.date.toISOString() }));
+const openId = Astro.url.searchParams.get('item') ?? undefined;
+---
+<App active="calendar" title="Content Calendar">
+  <div class="page-head">
+    <div>
+      <h1 class="h1">Content Calendar</h1>
+      <p class="sub">Your SEO strategy, laid out as work with dates on it.</p>
+    </div>
+    <button class="btn btn-ai" data-ask="What should we publish this week?">
+      <Icon name="sparkle" size={14} />Ask about the plan
+    </button>
+  </div>
+
+  <CalendarBoard client:load items={items} siteId={site.id} openId={openId} />
+</App>

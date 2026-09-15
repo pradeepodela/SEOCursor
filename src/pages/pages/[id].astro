@@ -1,0 +1,167 @@
+---
+import App from '../../layouts/App.astro';
+import Icon from '../../components/Icon.astro';
+import Field from '../../components/Field.astro';
+import { db } from '../../lib/db';
+import { resolveSite } from '../../lib/site';
+import { compact, num, pos, relDate, HEALTH_LABEL } from '../../lib/format';
+
+const { site } = await resolveSite(Astro);
+if (!site) return Astro.redirect('/connect');
+
+const page = await db.page.findFirst({
+  where: { id: Astro.params.id, siteId: site.id },
+  include: {
+    keywords: { orderBy: { impressions: 'desc' } },
+    issues: { where: { resolved: false } },
+  },
+});
+if (!page) return Astro.redirect(`/pages?site=${site.id}`);
+
+const [outLinks, inLinks] = await Promise.all([
+  db.link.findMany({ where: { siteId: site.id, fromPageId: page.id }, orderBy: { verdict: 'asc' } }),
+  db.link.findMany({ where: { siteId: site.id, toUrl: { endsWith: page.url } , isInternal: true }, take: 20 }),
+]);
+const brokenOut = outLinks.filter((l) => l.verdict === 'broken');
+const facts = [
+  { k: 'Word count', v: num(page.wordCount), warn: page.wordCount < 600 },
+  { k: 'Internal links', v: num(page.internalLinks), warn: page.internalLinks < 5 },
+  { k: 'External links', v: num(page.externalLinks), warn: false },
+  { k: 'Inbound links', v: num(page.inboundLinks), warn: false },
+  { k: 'Indexable', v: page.indexable ? 'Yes' : 'No', warn: !page.indexable },
+  { k: 'Canonical', v: page.canonical ? 'Set' : 'Missing', warn: !page.canonical },
+  { k: 'Schema', v: page.schemaTypes.length ? page.schemaTypes.join(', ') : 'None', warn: !page.schemaTypes.length },
+  { k: 'Last updated', v: relDate(page.lastUpdated), warn: false },
+];
+---
+<App active="pages" title={page.url}>
+  <div class="page-head">
+    <div style="min-width:0">
+      <a href={`/pages?site=${site.id}`} class="muted" style="font-size:12.5px;display:inline-block;margin-bottom:8px">← Pages</a>
+      <h1 class="h1 mono" style="font-size:22px">{page.url}</h1>
+      <p class="sub">{page.title}</p>
+    </div>
+    <div class="row">
+      <span class={`badge ${HEALTH_LABEL[page.health].tone}`}>{HEALTH_LABEL[page.health].text}</span>
+      <a class="btn" href={page.url.startsWith('/') ? new URL(page.url, site.url).toString() : page.url} target="_blank" rel="noreferrer">
+        <Icon name="external" size={13} />Open live
+      </a>
+    </div>
+  </div>
+
+  <div class="kpis" style="margin-bottom:18px">
+    <div class="kpi"><div class="kpi-label">Impressions</div><div class="kpi-val">{page.impressions ? compact(page.impressions) : '—'}</div><div class="kpi-note" style="margin-top:5px">Search Console</div></div>
+    <div class="kpi"><div class="kpi-label">Clicks</div><div class="kpi-val">{page.clicks || '—'}</div><div class="kpi-note" style="margin-top:5px">{page.keywordCount} ranking queries</div></div>
+    <div class="kpi"><div class="kpi-label">Avg. position</div><div class="kpi-val">{pos(page.position)}</div><div class="kpi-note" style="margin-top:5px">across all queries</div></div>
+    <div class="kpi"><div class="kpi-label">Words</div><div class="kpi-val" style={page.wordCount < 300 ? 'color:var(--amber)' : ''}>{num(page.wordCount)}</div><div class="kpi-note" style="margin-top:5px">{page.h2Count} H2 sections</div></div>
+  </div>
+
+  <div class="grid home-split" style="grid-template-columns: minmax(0,1fr) 320px;align-items:start">
+    <div class="col" style="gap:18px">
+      {page.keywords.length > 0 && (
+        <div class="card">
+          <div class="card-head"><div class="card-title">Keywords</div><div class="card-sub">{page.keywords.length} queries this URL ranks for</div></div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Query</th><th class="num">Impressions</th><th class="num">Clicks</th><th class="num">Position</th><th>Intent</th></tr></thead>
+              <tbody>
+                {page.keywords.map((k) => (
+                  <tr>
+                    <td>{k.keyword}</td>
+                    <td class="num">{compact(k.impressions)}</td>
+                    <td class="num">{k.clicks}</td>
+                    <td class="num">{k.position ? pos(k.position) : '—'}</td>
+                    <td><span class="badge gray">{k.intent[0] + k.intent.slice(1).toLowerCase()}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {page.issues.length > 0 && (
+        <div class="card">
+          <div class="card-head"><div class="card-title">Issues on this page</div><a class="btn btn-sm" href={`/audit?site=${site.id}`}>Open audit</a></div>
+          <div>
+            {page.issues.map((i) => (
+              <div class="issue">
+                <div class="issue-top">
+                  <span class={`dot sev-${i.severity}`}></span>
+                  <span class="issue-title">{i.title}</span>
+                  <span class={`badge ${i.severity === 'CRITICAL' ? 'red' : 'amber'}`}>{i.severity[0] + i.severity.slice(1).toLowerCase()}</span>
+                </div>
+                <div class="issue-why">{i.whyItMatters}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+
+    <div class="col" style="gap:18px">
+      <div class="card">
+        <div class="card-head"><div class="card-title">On-page</div></div>
+        <div style="padding:14px 18px">
+          <Field label="Title" value={page.title} count={page.title.length} max={60} />
+          <Field label="Meta description" value={page.metaDesc ?? '(missing)'} count={page.metaDesc?.length ?? 0} max={160} missing={!page.metaDesc} />
+          <Field label="H1" value={page.h1 ?? '(missing)'} missing={!page.h1} />
+          <Field label="Canonical" value={page.canonical ?? '(missing)'} mono missing={!page.canonical} />
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="card-title">Technical</div></div>
+        <div style="padding:4px 0">
+          {facts.map((f) => (
+            <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 18px;border-bottom:1px solid var(--line-2);font-size:13px">
+              <span class="muted">{f.k}</span>
+              <span style={f.warn ? 'color:var(--amber);font-weight:600' : 'font-weight:530'}>{f.v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Links</div>
+          <div class="card-sub">{outLinks.length} out · {page.inboundLinks} in</div>
+        </div>
+        <div style="padding:4px 0">
+          <div style="display:flex;justify-content:space-between;padding:9px 18px;border-bottom:1px solid var(--line-2);font-size:13px">
+            <span class="muted">Internal links out</span><span style="font-weight:530">{page.internalLinks}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:9px 18px;border-bottom:1px solid var(--line-2);font-size:13px">
+            <span class="muted">External links out</span><span style="font-weight:530">{page.externalLinks}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:9px 18px;border-bottom:1px solid var(--line-2);font-size:13px">
+            <span class="muted">Internal links in</span>
+            <span style={page.inboundLinks === 0 ? 'color:var(--amber);font-weight:600' : 'font-weight:530'}>{page.inboundLinks}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:9px 18px;font-size:13px">
+            <span class="muted">Broken links out</span>
+            <span style={brokenOut.length ? 'color:var(--red);font-weight:600' : 'font-weight:530'}>{brokenOut.length}</span>
+          </div>
+        </div>
+        {brokenOut.length > 0 && (
+          <div style="padding:0 18px 14px">
+            {brokenOut.slice(0, 5).map((l) => (
+              <div class="mono" style="font-size:11px;color:var(--red);padding:4px 0;word-break:break-all">
+                {l.statusCode ?? l.error} · {l.toUrl}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</App>
+
+<style is:global>
+  .fld { margin-bottom: 14px; }
+  .fld:last-child { margin-bottom: 0; }
+  .fld-k { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-4); display: flex; justify-content: space-between; }
+  .fld-v { font-size: 12.8px; line-height: 1.5; margin-top: 4px; color: var(--ink-2); word-break: break-word; }
+  .fld-v.mono { font-family: var(--mono); font-size: 11.5px; }
+  .fld-v.missing { color: var(--red); font-style: italic; }
+</style>

@@ -1,0 +1,753 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum OpportunityType {
+  NEW_CONTENT
+  UPDATE_PAGE
+  INTERNAL_LINKING
+  TECHNICAL
+  KEYWORD
+  COMPETITOR
+}
+
+enum Impact {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum Effort {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum Severity {
+  CRITICAL
+  WARNING
+  PASSED
+}
+
+enum CalendarType {
+  BLOG
+  PAGE
+  UPDATE
+  INTERNAL_LINKING
+  TECHNICAL
+  REFRESH
+}
+
+enum WorkStatus {
+  PLANNED
+  IN_PROGRESS
+  DONE
+  DISMISSED
+}
+
+enum ContentStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  UPDATE
+}
+
+enum KeywordSource {
+  SEARCH_CONSOLE
+  DATAFORSEO
+  MANUAL
+}
+
+enum SearchIntent {
+  INFORMATIONAL
+  COMMERCIAL
+  TRANSACTIONAL
+  NAVIGATIONAL
+}
+
+enum PageHealth {
+  GOOD
+  NEEDS_WORK
+  POOR
+  OPPORTUNITY
+}
+
+// ---------------------------------------------------------------- core
+
+model Site {
+  id        String   @id @default(cuid())
+  domain    String   @unique
+  url       String
+  name      String
+  emoji     String   @default("🌐")
+  isPrimary Boolean  @default(false)
+
+  // SEO health score breakdown (0-100)
+  healthScore     Int @default(0)
+  technicalScore  Int @default(0)
+  onPageScore     Int @default(0)
+  contentScore    Int @default(0)
+  backlinkScore   Int @default(0)
+  uxScore         Int @default(0)
+
+  // headline metrics
+  organicTraffic Int @default(0)
+  trafficDelta   Float @default(0)
+  keywordCount   Int @default(0)
+  keywordDelta   Float @default(0)
+  indexedPages   Int @default(0)
+  pagesDelta     Float @default(0)
+  issueCount     Int @default(0)
+  issueDelta     Float @default(0)
+  backlinkCount  Int @default(0)
+  domainRating   Int @default(0)
+
+  // crawl bookkeeping
+  lastCrawlAt   DateTime?
+  /** http | browser — whether the last crawl needed a headless browser. */
+  renderMode    String    @default("http")
+  robotsTxtUrl  String?
+  sitemapUrls   String[]  @default([])
+  crawlPageCap  Int       @default(150)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // LLM model choices (the API key lives in the environment, never the database)
+  // Fallbacks only — provisionSite() picks from the providers that actually
+  // have a key, so a new site never starts out pointing at an unusable one.
+  ideaModel  String @default("groq:openai/gpt-oss-20b")
+  draftModel String @default("groq:openai/gpt-oss-120b")
+
+  crawls        CrawlJob[]
+  links         Link[]
+  gsc           GscConnection?
+  wordpress     WordPressConnection?
+  keywordProvider DataForSeoConnection?
+  ideas         BlogIdea[]
+  generations   GenerationJob[]
+  competitors   Competitor[]
+  pages         Page[]
+  keywords      Keyword[]
+  issues        AuditIssue[]
+  opportunities Opportunity[]
+  calendarItems CalendarItem[]
+  briefs        ContentBrief[]
+  content       ContentPiece[]
+  clusters      StrategyCluster[]
+  strategy      Strategy?
+  backlinks     Backlink[]
+  metrics       MetricPoint[]
+  messages      ChatMessage[]
+}
+
+model Competitor {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  domain String
+  name   String
+  label  String @default("A")
+  color  String @default("#6366f1")
+
+  organicTraffic Int @default(0)
+  keywordCount   Int @default(0)
+  backlinkCount  Int @default(0)
+  domainRating   Int @default(0)
+  contentCount   Int @default(0)
+
+  // AI-derived narrative about this competitor
+  insight     String?
+  insightGap  String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([siteId, domain])
+}
+
+model MetricPoint {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  metric String   // organic_traffic | keywords | indexed_pages | issues
+  date   DateTime
+  value  Float
+
+  @@index([siteId, metric])
+}
+
+// ---------------------------------------------------------------- pages
+
+model Page {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  url          String
+  title        String
+  metaDesc     String?
+  h1           String?
+  primaryTopic String?
+
+  wordCount     Int @default(0)
+  traffic       Int @default(0)
+  impressions   Int @default(0)
+  clicks        Int @default(0)
+  position      Float?
+  keywordCount  Int @default(0)
+  internalLinks Int @default(0)
+  externalLinks Int @default(0)
+  inboundLinks  Int @default(0)
+
+  schemaTypes String[] @default([])
+  indexable   Boolean  @default(true)
+  canonical   String?
+  health      PageHealth @default(GOOD)
+
+  // --- observed by the crawler ---
+  statusCode        Int?
+  redirectedTo      String?
+  redirectHops      Int      @default(0)
+  responseMs        Int?
+  sizeBytes         Int?
+  contentType       String?
+  depth             Int      @default(0)
+  discoveredVia     String?  // sitemap | link | seed
+  robotsMeta        String?
+  lang              String?
+  ogTitle           String?
+  ogDescription     String?
+  ogImage           String?
+  h1Count           Int      @default(0)
+  h2Count           Int      @default(0)
+  imageCount        Int      @default(0)
+  imagesMissingAlt  Int      @default(0)
+  hasViewport       Boolean  @default(false)
+  brokenLinksOut    Int      @default(0)
+  contentHash       String?
+  crawledAt         DateTime?
+
+  lastUpdated DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  keywords        Keyword[]
+  issues          AuditIssue[]
+  recommendations PageRecommendation[]
+  outboundLinks   Link[]               @relation("LinkSource")
+
+  @@unique([siteId, url])
+}
+
+model PageRecommendation {
+  id     String @id @default(cuid())
+  pageId String
+  page   Page   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  order   Int    @default(0)
+  title   String
+  detail  String
+  impact  Impact @default(MEDIUM)
+
+  beforeText String?
+  afterText  String?
+
+  applied Boolean @default(false)
+}
+
+// ---------------------------------------------------------------- keywords
+
+model Keyword {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pageId String?
+  page   Page?  @relation(fields: [pageId], references: [id], onDelete: SetNull)
+
+  keyword    String
+  volume     Int          @default(0)
+  difficulty Int          @default(0)
+  cpc        Float        @default(0)
+  intent     SearchIntent @default(INFORMATIONAL)
+
+  position    Float?
+  impressions Int @default(0)
+  clicks      Int @default(0)
+
+  // Where the row came from. Search Console knows impressions and position but
+  // never volume or difficulty; DataForSEO is the reverse. Keeping the source
+  // explicit means a merged row is never mistaken for one measured end to end.
+  source       KeywordSource @default(SEARCH_CONSOLE)
+  competition  Float?
+  researchedAt DateTime?
+  tracked      Boolean       @default(false)
+
+  opportunity Impact  @default(MEDIUM)
+  aiInsight   String?
+
+  @@unique([siteId, keyword])
+}
+
+// ---------------------------------------------------------------- audit
+
+model AuditIssue {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pageId String?
+  page   Page?  @relation(fields: [pageId], references: [id], onDelete: SetNull)
+
+  code        String   @default("manual") // stable rule id, lets a re-crawl replace its own findings
+  title       String
+  category    String // Technical | Content | On-page | Internal Linking | Schema | Indexing | Performance | Images | Metadata
+  severity    Severity @default(WARNING)
+  affectedUrl String?
+  affectedCount Int    @default(1)
+  samples     String[] @default([])
+  fromCrawl   Boolean  @default(false)
+
+  whyItMatters      String
+  recommendedAction String
+  aiFixable         Boolean @default(false)
+  resolved          Boolean @default(false)
+
+  beforeText String?
+  afterText  String?
+
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------- opportunities
+
+model Opportunity {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  rank    Int             @default(0)
+  title   String
+  subject String // the keyword / url the opportunity is about
+  type    OpportunityType
+  impact  Impact          @default(MEDIUM)
+  effort  Effort          @default(MEDIUM)
+
+  searchVolume    Int?
+  impressions     Int?
+  difficulty      Int?
+  competition     String? // High | Medium | Low
+  currentCoverage String? // High | Medium | Low | None
+
+  quickWin          Boolean @default(false)
+  recommendedAction String
+  actionLabel       String  @default("Generate Brief")
+
+  // the reasoning layer: array of { source, finding }
+  reasoning  Json    @default("[]")
+  conclusion String?
+
+  status WorkStatus @default(PLANNED)
+
+  createdAt DateTime @default(now())
+
+  briefs        ContentBrief[]
+  calendarItems CalendarItem[]
+}
+
+// ---------------------------------------------------------------- calendar
+
+model CalendarItem {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  date      DateTime
+  type      CalendarType
+  title     String
+  targetUrl String?
+  notes     String?
+  status    WorkStatus   @default(PLANNED)
+
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  contentId String?
+  content   ContentPiece? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  blogIdeaId String?   @unique
+  blogIdea   BlogIdea? @relation(fields: [blogIdeaId], references: [id], onDelete: SetNull)
+
+  /** What the scheduler should do when this item's date arrives. */
+  autoGenerate Boolean @default(true)
+  autoPublish  Boolean @default(false)
+  ranAt        DateTime?
+  runError     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([siteId, date])
+  @@index([date, status])
+}
+
+// ---------------------------------------------------------------- content
+
+model ContentBrief {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  targetKeyword  String
+  intent         SearchIntent @default(COMMERCIAL)
+  recommendedUrl String
+  suggestedTitle String
+  metaDesc       String?
+  searchVolume   Int          @default(0)
+  difficulty     Int          @default(0)
+  targetWords    Int          @default(1800)
+
+  outline       Json @default("[]") // [{ tag: 'H2', text, notes }]
+  entities      String[] @default([])
+  internalLinks String[] @default([])
+  competitors   String[] @default([])
+  questions     String[] @default([])
+
+  createdAt DateTime @default(now())
+
+  content ContentPiece[]
+}
+
+model ContentPiece {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  briefId String?
+  brief   ContentBrief? @relation(fields: [briefId], references: [id], onDelete: SetNull)
+
+  title     String
+  slug      String
+  status    ContentStatus @default(DRAFT)
+  body      String        @default("")
+  excerpt   String?
+  wordCount Int           @default(0)
+  seoScore  Int           @default(0)
+
+  targetKeyword String?
+  scheduledFor  DateTime?
+  publishedAt   DateTime?
+
+  /** Provenance: which model wrote this and what it cost. */
+  model        String?
+  promptTokens Int?
+  outputTokens Int?
+  costUsd      Float?
+
+  /** Where it was published to. */
+  wpPostId     Int?
+  wpUrl        String?
+  wpStatus     String?
+  publishError String?
+
+  blogIdeaId String?   @unique
+  blogIdea   BlogIdea? @relation(fields: [blogIdeaId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  calendarItems CalendarItem[]
+
+  @@unique([siteId, slug])
+}
+
+// ---------------------------------------------------------------- strategy
+
+model Strategy {
+  id     String @id @default(cuid())
+  siteId String @unique
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  headline        String
+  currentPosition Json @default("[]") // string[]
+  growthAreas     Json @default("[]") // [{ name, rationale }]
+  summary         String
+
+  updatedAt DateTime @updatedAt
+}
+
+model StrategyCluster {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  pillar   String
+  children String[] @default([])
+  priority Int      @default(0)
+  covered  Int      @default(0)
+  total    Int      @default(0)
+}
+
+// ---------------------------------------------------------------- backlinks
+
+model Backlink {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  sourceDomain String
+  sourceUrl    String
+  targetUrl    String
+  anchorText   String
+  domainRating Int      @default(0)
+  dofollow     Boolean  @default(true)
+  firstSeen    DateTime @default(now())
+}
+
+// ---------------------------------------------------------------- assistant
+
+model ChatMessage {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  role    String // user | assistant
+  content String
+  // structured attachment the UI renders as a card: { kind, data }
+  payload Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([siteId, createdAt])
+}
+
+
+// ---------------------------------------------------------------- crawl
+
+enum CrawlStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+model CrawlJob {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  status CrawlStatus @default(QUEUED)
+  phase  String      @default("Queued")
+
+  pagesQueued   Int @default(0)
+  pagesCrawled  Int @default(0)
+  linksChecked  Int @default(0)
+  brokenLinks   Int @default(0)
+  issuesFound   Int @default(0)
+
+  maxPages Int @default(150)
+
+  error      String?
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+
+  @@index([siteId, startedAt])
+}
+
+/** Every link the crawler saw, with the status it resolved to. */
+model Link {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  fromPageId String?
+  fromPage   Page?  @relation("LinkSource", fields: [fromPageId], references: [id], onDelete: Cascade)
+
+  fromUrl    String
+  toUrl      String
+  anchorText String  @default("")
+  rel        String?
+  isInternal Boolean @default(true)
+
+  statusCode Int?
+  ok         Boolean   @default(true)
+  /** ok | broken | blocked | unreachable | unchecked — 403s and timeouts are not broken links. */
+  verdict    String    @default("unchecked")
+  redirectTo String?
+  error      String?
+  checkedAt  DateTime?
+
+  @@index([siteId, ok])
+  @@index([siteId, verdict])
+  @@index([siteId, toUrl])
+}
+
+// ---------------------------------------------------------------- google
+
+model GscConnection {
+  id     String @id @default(cuid())
+  siteId String @unique
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  googleEmail  String?
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  scope        String
+
+  /** The Search Console property, e.g. "sc-domain:example.com" or "https://example.com/". */
+  propertyUrl String?
+  properties  String[] @default([])
+
+  lastSyncAt DateTime?
+  syncError  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+
+// ---------------------------------------------------------------- blog ideas
+
+enum IdeaStatus {
+  SUGGESTED
+  SCHEDULED
+  GENERATING
+  DRAFTED
+  PUBLISHED
+  DISMISSED
+}
+
+enum IdeaSource {
+  GSC_NEAR_MISS     // ranks on page 2 — a page could lift it
+  GSC_NO_CLICKS     // impressions but nobody clicks
+  CONTENT_GAP       // a topic the crawl shows is uncovered
+  THIN_PAGE         // an existing page too short to compete
+  LLM               // proposed by the model from site context
+  MANUAL            // typed in by the user
+}
+
+/** A blog title worth writing, with the evidence that justified it. */
+model BlogIdea {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  title       String
+  angle       String?      // what makes this different from what already ranks
+  targetQuery String?      // the query it goes after
+  rationale   String       // why this is worth writing, in plain language
+  evidence    Json    @default("[]") // [{ source, finding }] — the numbers behind it
+
+  source IdeaSource @default(LLM)
+  score  Int        @default(50)  // 0-100 priority
+
+  // Measured signals carried across from GSC, where they exist.
+  impressions Int?
+  clicks      Int?
+  position    Float?
+
+  status    IdeaStatus @default(SUGGESTED)
+  createdBy String     @default("ai") // ai | user
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  calendarItem CalendarItem?
+  content      ContentPiece?
+
+  @@index([siteId, status])
+}
+
+// ---------------------------------------------------------------- wordpress
+
+model WordPressConnection {
+  id     String @id @default(cuid())
+  siteId String @unique
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  baseUrl  String   // https://example.com
+  username String
+  /** A WordPress application password, not the account password. */
+  appPassword String
+
+  defaultStatus   String  @default("draft") // draft | publish | pending
+  defaultCategory Int?
+  defaultAuthor   Int?
+
+  verifiedAt DateTime?
+  lastError  String?
+  wpVersion  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------- generation jobs
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+/** An LLM run: generating ideas, or drafting one blog post. */
+model GenerationJob {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  kind   String    // ideas | draft | publish
+  status JobStatus @default(QUEUED)
+  phase  String    @default("Queued")
+
+  ideaId    String?
+  contentId String?
+
+  model        String?
+  promptTokens Int?
+  outputTokens Int?
+  costUsd      Float?
+
+  result Json?
+  error  String?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([siteId, startedAt])
+}
+
+/// DataForSEO. Credentials live in the environment like the model keys; what is
+/// stored here is only which market to price keywords in, which is per website.
+model DataForSeoConnection {
+  id     String @id @default(cuid())
+  siteId String @unique
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  locationCode Int
+  locationName String
+  languageCode String
+  languageName String
+
+  verifiedAt     DateTime?
+  lastError      String?
+  balanceUsd     Float?
+  lastResearchAt DateTime?
+  keywordsPulled Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
