@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { locations, configured } from '../../../lib/dataforseo';
+import { locations, configured, isUnverified } from '../../../lib/dataforseo';
 import { ok, fail } from '../../../lib/schemas';
 
 export const prerender = false;
@@ -21,6 +21,7 @@ export const GET: APIRoute = async () => {
     cache = { at: Date.now(), data };
     return ok({ locations: data, cached: false });
   } catch (e) {
-    return fail((e as Error).message, 502);
+    const msg = (e as Error).message;
+    return fail(msg, isUnverified(msg) ? 403 : 502);
   }
 };

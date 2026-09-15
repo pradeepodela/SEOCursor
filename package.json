@@ -19,7 +19,9 @@
     "llm-check": "node scripts/llm-check.mjs",
     "wp-check": "node scripts/wp-check.mjs",
     "hydrate-check": "node scripts/hydrate-check.mjs",
-    "dev:clean": "rm -rf node_modules/.vite .astro && astro dev"
+    "dev:clean": "rm -rf node_modules/.vite .astro && astro dev",
+    "keyword-check": "node scripts/keyword-check.mjs",
+    "db-retry-check": "node scripts/db-retry-check.mjs"
   },
   "dependencies": {
     "@astrojs/node": "^9.5.5",

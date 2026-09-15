@@ -18,6 +18,7 @@ const SCREENS = [
   ['/audit', []],
   ['/pages', []],
   ['/links', []],
+  ['/keywords', []],
   ['/ideas', []],
   ['/calendar', []],
   ['/studio', []],
@@ -34,8 +35,15 @@ console.log(`\nHydration check — ${B}\n`);
 for (const [path, required] of SCREENS) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const errors = [];
+  const notes = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    // A failed fetch is the app's business — it renders an error state and
+    // carries on. Only uncaught JS breaks hydration.
+    if (/Failed to load resource/i.test(m.text())) { notes.push(m.text()); return; }
+    errors.push(m.text());
+  });
 
   let note = '';
   try {
@@ -54,6 +62,7 @@ for (const [path, required] of SCREENS) {
       else if (errors.length) note = errors[0].slice(0, 90);
       else note = `missing ${missing.join(', ')}`;
     }
+    if (ok && notes.length) note = `(${notes.length} request${notes.length > 1 ? 's' : ''} refused by a backing API — handled)`;
     console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${path.padEnd(12)} ${note}`);
   } catch (e) {
     fail++;

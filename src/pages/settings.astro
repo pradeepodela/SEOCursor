@@ -3,21 +3,24 @@ import App from '../layouts/App.astro';
 import Icon from '../components/Icon.astro';
 import GscPanel from '../islands/GscPanel';
 import WpPanel from '../islands/WpPanel';
+import KeywordPanel from '../islands/KeywordPanel';
 import ModelPanel from '../islands/ModelPanel';
 import { db } from '../lib/db';
 import { resolveSite } from '../lib/site';
 import { isConfigured, googleConfig } from '../lib/google';
 import { llmConfigured, verifyAll, liveModels } from '../lib/llm';
+import { configured as dfsConfigured } from '../lib/dataforseo';
 import { relDate } from '../lib/format';
 
 const { site } = await resolveSite(Astro);
 if (!site) return Astro.redirect('/connect');
 
-const [competitors, conn, lastCrawl, wp] = await Promise.all([
+const [competitors, conn, lastCrawl, wp, kwProvider] = await Promise.all([
   db.competitor.findMany({ where: { siteId: site.id }, orderBy: { label: 'asc' } }),
   db.gscConnection.findUnique({ where: { siteId: site.id } }),
   db.crawlJob.findFirst({ where: { siteId: site.id }, orderBy: { startedAt: 'desc' } }),
   db.wordPressConnection.findUnique({ where: { siteId: site.id } }),
+  db.dataForSeoConnection.findUnique({ where: { siteId: site.id } }),
 ]);
 
 const providerStatus = await verifyAll();
@@ -37,6 +40,19 @@ const wpState = {
   defaultStatus: wp?.defaultStatus ?? 'draft',
   verifiedAt: wp?.verifiedAt?.toISOString() ?? null,
   lastError: wp?.lastError ?? null,
+};
+
+const keywordState = {
+  configured: dfsConfigured(),
+  connected: !!kwProvider,
+  locationCode: kwProvider?.locationCode ?? null,
+  locationName: kwProvider?.locationName ?? null,
+  languageCode: kwProvider?.languageCode ?? null,
+  languageName: kwProvider?.languageName ?? null,
+  balanceUsd: kwProvider?.balanceUsd ?? null,
+  lastResearchAt: kwProvider?.lastResearchAt?.toISOString() ?? null,
+  keywordsPulled: kwProvider?.keywordsPulled ?? 0,
+  lastError: kwProvider?.lastError ?? null,
 };
 
 const gscState = {
@@ -84,6 +100,8 @@ const notice = Astro.url.searchParams.get('gsc');
       <WpPanel client:load siteId={site.id} state={wpState} />
 
       <GscPanel client:load siteId={site.id} state={gscState} notice={notice} />
+
+      <KeywordPanel client:load siteId={site.id} state={keywordState} />
 
       <div class="card">
         <div class="card-head">
@@ -200,9 +218,13 @@ const notice = Astro.url.searchParams.get('gsc');
           <div style="display:flex;align-items:center;gap:12px;padding:12px 18px">
             <div style="flex:1">
               <div style="font-size:13px;font-weight:550">Keyword provider</div>
-              <div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">Search volume and difficulty</div>
+              <div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">
+                {kwProvider ? `DataForSEO · ${kwProvider.locationName}` : 'Search volume and difficulty'}
+              </div>
             </div>
-            <span class="badge gray">Later step</span>
+            <span class={`badge ${kwProvider ? 'green' : keywordState.configured ? 'amber' : 'gray'}`}>
+              {kwProvider ? 'Connected' : keywordState.configured ? 'Pick a market' : 'Not connected'}
+            </span>
           </div>
         </div>
       </div>

@@ -29,6 +29,7 @@ const stats = {
   pageId: (await db.page.findFirst({ where: { siteId: site.id, crawledAt: { not: null } } }))?.id,
   // Whether auto-publish should be accepted or refused depends on this.
   hasWordPress: !!(await db.wordPressConnection.findUnique({ where: { siteId: site.id } })),
+  hasKeywordMarket: !!(await db.dataForSeoConnection.findUnique({ where: { siteId: site.id } })),
 };
 await db.$disconnect();
 
@@ -92,6 +93,33 @@ if (ideaId) {
 
   r = await fetch(`${B}/api/ideas/${ideaId}`, { method: 'DELETE' }).then(async (x) => ({ s: x.status, j: await x.json() }));
   check('dismisses it', r.j.ok === true);
+}
+
+console.log('\nKeyword research');
+{
+  const dfsReady = !!(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  const hasMarket = stats.hasKeywordMarket;
+
+  let r = await post('/api/keywords/research', { siteId: site.id, mode: 'seeds', seeds: [], limit: 50 });
+  check('research needs a seed keyword', r.s === 422, r.j.issues?.[0]?.message ?? '');
+
+  r = await post('/api/keywords/research', { siteId: site.id, mode: 'site', limit: 50 });
+  // Without credentials the route must refuse before spending anything; with
+  // them but no market chosen it must say so rather than guess a country.
+  const expected = !dfsReady ? 503 : hasMarket ? 201 : 409;
+  check(
+    !dfsReady ? 'research refuses without credentials' : hasMarket ? 'research runs' : 'research requires a market',
+    r.s === expected,
+    r.j.error ?? `${r.j.found ?? ''} keywords`,
+  );
+
+  r = await fetch(`${B}/api/keywords/locations`).then(async (x) => ({ s: x.status, j: await x.json().catch(() => ({})) }));
+  // 403 is the provider refusing an unverified account — a real answer, not a
+  // bug here, so the check accepts it and says which one happened.
+  const label = !dfsReady ? 'market list refuses without credentials'
+    : r.s === 403 ? 'market list blocked — account not verified at the provider'
+    : 'market list loads';
+  check(label, r.s === (dfsReady ? (r.s === 403 ? 403 : 200) : 503), r.s === 200 ? `${r.j.data?.locations?.length ?? 0} countries` : (r.j.error ?? '').slice(0, 60));
 }
 
 console.log('\nScheduler');

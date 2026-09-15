@@ -48,6 +48,8 @@ export const POST: APIRoute = async ({ request }) => {
         pages: ctx.pages.length,
         nearMissQueries: ctx.nearMiss.length,
         noClickQueries: ctx.noClicks.length,
+        researchedKeywords: ctx.research.length,
+        market: ctx.market,
         hasSearchConsole: ctx.hasGsc,
       },
     });

@@ -198,3 +198,32 @@ src/lib/schemas.ts         Zod schemas and API helpers
 src/pages/                 routes and API endpoints
 src/islands/               React: onboarding, audit board, GSC panel
 ```
+
+## Keyword research
+
+Search Console reports what a site already earns — impressions, clicks and
+position for queries Google actually showed it for. It has no opinion on terms
+the site has never ranked for, and no measure of how hard anything is to win.
+DataForSEO covers that half: monthly volume and a 0-100 difficulty for any
+term, in a market you choose per website.
+
+```
+DATAFORSEO_LOGIN="you@example.com"
+DATAFORSEO_PASSWORD="..."
+```
+
+Three research modes, each one billed API call regardless of how many keywords
+come back:
+
+| Mode | What it pulls |
+| --- | --- |
+| Keywords for this site | Everything the provider associates with the domain |
+| Where we already rank | Terms the domain holds a position for, with the position |
+| Ideas from seed terms | Related terms for words you supply |
+
+`npm run keyword-check` verifies credentials and the market list without
+spending anything; `--live` adds one small billed call.
+
+Researched keywords feed the blog idea generator, which is then required to
+quote volume and difficulty in its reasoning and to refuse topics guarded by a
+difficulty a small site cannot beat.

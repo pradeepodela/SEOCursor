@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { db } from '../../../lib/db';
 import { enrich } from '../../../lib/keywords';
-import { configured } from '../../../lib/dataforseo';
+import { configured, isUnverified } from '../../../lib/dataforseo';
 import { zKeywordEnrich, parseBody, ok, fail } from '../../../lib/schemas';
 
 export const prerender = false;
@@ -22,6 +22,6 @@ export const POST: APIRoute = async ({ request }) => {
   } catch (e) {
     const error = (e as Error).message;
     await db.dataForSeoConnection.update({ where: { siteId }, data: { lastError: error } }).catch(() => {});
-    return fail(error, 502);
+    return fail(error, isUnverified(error) ? 403 : 502);
   }
 };

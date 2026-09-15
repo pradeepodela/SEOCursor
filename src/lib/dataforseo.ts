@@ -15,6 +15,17 @@ import { loadEnv } from './env';
 
 const BASE = 'https://api.dataforseo.com/v3';
 
+/** DataForSEO's "account not verified yet" status. */
+export const UNVERIFIED = 40104;
+
+export const UNVERIFIED_MESSAGE =
+  'Your DataForSEO account has not been verified yet, so the API is closed to it. ' +
+  'This is not a credentials problem — the login works and the balance reads fine. ' +
+  'Complete verification at app.dataforseo.com, then try again. ' +
+  'Every endpoint except the account check is blocked until then, the free sandbox included.';
+
+export const isUnverified = (message: string): boolean => message === UNVERIFIED_MESSAGE;
+
 export type Market = {
   locationCode: number;
   locationName: string;
@@ -62,6 +73,10 @@ async function call<T>(path: string, body?: unknown, timeoutMs = 60_000): Promis
   if (!json) throw new Error(`DataForSEO returned ${res.status} with no JSON body`);
 
   if (json.status_code !== 20000) {
+    // 40104 is an account gate, not a credentials problem, and the raw message
+    // reads like one. Every endpoint except /appendix/user_data returns it —
+    // the sandbox included — so there is no partial mode to fall back to.
+    if (json.status_code === UNVERIFIED) throw new Error(UNVERIFIED_MESSAGE);
     throw new Error(`DataForSEO: ${json.status_message ?? `status ${json.status_code}`}`);
   }
 
@@ -81,22 +96,40 @@ export type Account = {
   error?: string;
   balanceUsd?: number;
   login?: string;
+  /** Credentials are valid even when the account itself is still gated. */
+  credentialsValid?: boolean;
 };
 
-/** Free call — confirms the credentials and shows what is left to spend. */
+/**
+ * Two free calls, because they answer different questions.
+ *
+ * /appendix/user_data proves the credentials and reports the balance, and it
+ * keeps working on an account that has not been verified — so on its own it
+ * would report a healthy connection that cannot make a single research call.
+ * The Labs status endpoint is the one that actually reflects API access.
+ */
 export async function verifyAccount(): Promise<Account> {
   if (!configured()) return { ok: false, error: 'DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD are not set in .env' };
+
+  let balanceUsd: number | undefined;
+  let login: string | undefined;
+
   try {
     const result = await call<any[]>('/appendix/user_data');
     const money = result?.[0]?.money;
-    return {
-      ok: true,
-      balanceUsd: typeof money?.balance === 'number' ? money.balance : undefined,
-      login: result?.[0]?.login,
-    };
+    balanceUsd = typeof money?.balance === 'number' ? money.balance : undefined;
+    login = result?.[0]?.login;
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    return { ok: false, error: (e as Error).message, credentialsValid: false };
   }
+
+  try {
+    await call<unknown>('/dataforseo_labs/status');
+  } catch (e) {
+    return { ok: false, error: (e as Error).message, credentialsValid: true, balanceUsd, login };
+  }
+
+  return { ok: true, balanceUsd, login, credentialsValid: true };
 }
 
 // ---------------------------------------------------------------- markets

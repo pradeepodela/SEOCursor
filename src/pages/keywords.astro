@@ -4,31 +4,46 @@ import Icon from '../components/Icon.astro';
 import { db } from '../lib/db';
 import { resolveSite } from '../lib/site';
 import { compact, pos } from '../lib/format';
+import KeywordResearch from '../islands/KeywordResearch';
 
 const { site } = await resolveSite(Astro);
 if (!site) return Astro.redirect('/connect');
 
-const [conn, keywords] = await Promise.all([
+const [conn, provider, keywords] = await Promise.all([
   db.gscConnection.findUnique({ where: { siteId: site.id } }),
+  db.dataForSeoConnection.findUnique({ where: { siteId: site.id } }),
   db.keyword.findMany({
     where: { siteId: site.id },
     include: { page: true },
-    orderBy: [{ impressions: 'desc' }],
+    orderBy: [{ impressions: 'desc' }, { volume: 'desc' }],
     take: 500,
   }),
 ]);
 
-const connected = !!conn?.propertyUrl && !!conn.lastSyncAt;
+const gscConnected = !!conn?.propertyUrl && !!conn.lastSyncAt;
+const hasProvider = !!provider;
+
+// Two independent sources now feed this screen, so the empty state is about
+// having no keywords at all rather than about Search Console specifically.
+const connected = gscConnected || hasProvider || keywords.length > 0;
+const ungraded = keywords.filter((k) => k.difficulty === 0 && k.volume > 0).length;
 const filter = Astro.url.searchParams.get('f') ?? 'all';
 
 const near = keywords.filter((k) => k.position !== null && k.position >= 8 && k.position <= 20);
 const top3 = keywords.filter((k) => k.position !== null && k.position < 4);
 const noClicks = keywords.filter((k) => k.clicks === 0 && k.impressions >= 50);
 
+// Real demand the site has no foothold on at all — only visible once a
+// provider has been asked, because Search Console can never report it.
+const unclaimed = keywords.filter((k) => k.volume > 0 && k.position === null);
+const winnable = keywords.filter((k) => k.volume >= 100 && k.difficulty > 0 && k.difficulty <= 40);
+
 const shown =
   filter === 'near' ? near :
   filter === 'top3' ? top3 :
   filter === 'noclicks' ? noClicks :
+  filter === 'unclaimed' ? unclaimed :
+  filter === 'winnable' ? winnable :
   keywords;
 
 const totalImpr = keywords.reduce((n, k) => n + k.impressions, 0);
@@ -39,17 +54,23 @@ const FILTERS = [
   { key: 'all', label: 'All', n: keywords.length },
   { key: 'near', label: 'Page 2 — closest wins', n: near.length },
   { key: 'noclicks', label: 'Impressions, no clicks', n: noClicks.length },
+  { key: 'winnable', label: 'Winnable — volume, low difficulty', n: winnable.length },
+  { key: 'unclaimed', label: 'Demand, not ranking', n: unclaimed.length },
   { key: 'top3', label: 'Top 3', n: top3.length },
-];
+].filter((f) => f.n > 0 || f.key === 'all');
 ---
 <App active="keywords" title="Keywords">
   <div class="page-head">
     <div>
       <h1 class="h1">Keywords</h1>
       <p class="sub">
-        {connected
-          ? `${keywords.length} queries from Search Console · last ${conn!.lastSyncAt ? new Date(conn!.lastSyncAt).toLocaleDateString() : ''} sync`
-          : 'Search Console is not connected'}
+        {!connected
+          ? 'No keyword data yet'
+          : [
+              `${keywords.length} keywords`,
+              gscConnected ? 'Search Console' : null,
+              hasProvider ? `DataForSEO · ${provider!.locationName}` : null,
+            ].filter(Boolean).join(' · ')}
       </p>
     </div>
     <a class="btn" href={`/settings?site=${site.id}`}><Icon name="refresh" size={13} />Sync</a>
@@ -57,15 +78,27 @@ const FILTERS = [
 
   {!connected ? (
     <div class="locked" style="padding:44px 22px">
-      <div class="locked-title">Keyword data comes from Google</div>
+      <div class="locked-title">Keyword data comes from two places</div>
       <div class="locked-body">
-        We do not guess at this. Every query below will be one Google actually showed you for, with the real
-        impressions, clicks and average position attached. Connect Search Console to populate it.
+        We do not guess at this. <strong>Search Console</strong> reports what this site already earns — the real
+        impressions, clicks and average position for queries Google actually showed you for. It cannot tell you
+        about terms you have never ranked for. <strong>DataForSEO</strong> covers that half: monthly search volume
+        and a difficulty score for any term, ranked or not. Connect either to populate this screen; connect both
+        and every row carries demand, difficulty and your current position together.
       </div>
-      <a class="btn btn-primary" style="margin-top:16px" href={`/settings?site=${site.id}`}>Connect Search Console</a>
+      <a class="btn btn-primary" style="margin-top:16px" href={`/settings?site=${site.id}`}>Connect a data source</a>
     </div>
   ) : (
     <>
+      {hasProvider && (
+        <KeywordResearch
+          client:load
+          siteId={site.id}
+          market={`${provider!.locationName} · ${provider!.languageName}`}
+          keywordsWithoutDifficulty={ungraded}
+        />
+      )}
+
       <div class="meta-grid" style="margin-bottom:18px;max-width:640px">
         <div class="meta-cell"><div class="meta-k">Queries</div><div class="meta-v">{compact(keywords.length)}</div></div>
         <div class="meta-cell"><div class="meta-k">Impressions</div><div class="meta-v">{compact(totalImpr)}</div></div>
@@ -102,7 +135,8 @@ const FILTERS = [
           <table class="tbl">
             <thead>
               <tr>
-                <th>Query</th><th class="num">Impressions</th><th class="num">Clicks</th>
+                <th>Query</th><th class="num">Volume</th><th class="num">Difficulty</th>
+                <th class="num">Impressions</th><th class="num">Clicks</th>
                 <th class="num">CTR</th><th class="num">Position</th><th>Ranking page</th><th>Intent</th>
               </tr>
             </thead>
@@ -113,11 +147,19 @@ const FILTERS = [
                 return (
                   <tr>
                     <td style="font-weight:520;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{k.keyword}</td>
+                    <td class="num">{k.volume ? compact(k.volume) : <span class="dim">—</span>}</td>
+                    <td class="num">
+                      {k.difficulty
+                        ? <span class={`badge ${k.difficulty <= 30 ? 'green' : k.difficulty <= 60 ? 'amber' : 'gray'}`}>{k.difficulty}</span>
+                        : <span class="dim">—</span>}
+                    </td>
                     <td class="num">{compact(k.impressions)}</td>
                     <td class="num">{k.clicks}</td>
                     <td class="num muted">{kctr}%</td>
                     <td class="num">
-                      <span class={`badge ${p < 4 ? 'green' : p <= 10 ? 'blue' : p <= 20 ? 'amber' : 'gray'}`}>{pos(k.position)}</span>
+                      {k.position === null
+                        ? <span class="dim">not ranking</span>
+                        : <span class={`badge ${p < 4 ? 'green' : p <= 10 ? 'blue' : p <= 20 ? 'amber' : 'gray'}`}>{pos(k.position)}</span>}
                     </td>
                     <td>
                       {k.page
