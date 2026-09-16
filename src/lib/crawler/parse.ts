@@ -126,7 +126,8 @@ export function parseHtml(html: string, pageUrl: string): ParsedPage {
     ogImage: attr($, 'meta[property="og:image"]'),
     schemaTypes: [...schemaTypes],
     wordCount: words.length,
-    textSample: text.slice(0, 400),
+    // Enough prose to show what the page actually claims, not just its shape.
+    textSample: text.slice(0, 1200),
     contentHash: createHash('sha1').update(words.join(' ')).digest('hex').slice(0, 16),
     images,
     imagesMissingAlt: images.filter((i) => i.alt === null || i.alt.trim() === '').length,

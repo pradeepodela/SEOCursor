@@ -227,3 +227,35 @@ spending anything; `--live` adds one small billed call.
 Researched keywords feed the blog idea generator, which is then required to
 quote volume and difficulty in its reasoning and to refuse topics guarded by a
 difficulty a small site cannot beat.
+
+## Why drafts used to be slop
+
+The first version handed the writer a title, some headings, and the instruction
+"be concrete, use specific numbers". With no facts supplied, the only way to
+obey was to invent them — so it produced a fabricated pilot study, invented
+ROC-AUC figures, and an API endpoint the product did not have, aimed at a
+reader who would never run Python.
+
+Three things changed:
+
+**Grounding.** The crawler now stores each page's H2s and the first 1200
+characters of its prose. Generation builds a fact sheet from that — what the
+product is, what it does, what its pages say — and the writer may not reference
+a capability that is not in it. Re-crawl a site before generating; without page
+content the run refuses rather than inventing.
+
+**Claim checking.** Every draft is scanned for unsourced statistics, figures
+lifted from screenshots, invented endpoints, uncited research, code-span names
+the site never uses, and links to pages that do not exist. Hits are returned as
+`needsChecking` — surfaced for a person, never silently dropped. `npm run
+fact-check` tests the detector against known good and bad sentences.
+
+**A grade that measures the right things.** The old score counted headings and
+word count, which is why a fabricated draft scored 83. The grade now leads with
+trust — fabrications cost 10 points each — then direct-answer opening, FAQ
+coverage, question headings, length, links and filler phrasing. Every check is
+returned with the draft so you can see what failed and why.
+
+Drafts are also written for AI answers, not only search: a self-contained
+opening answer, sections that stand alone when quoted, question-shaped
+headings, and an FAQ block emitted as FAQPage JSON-LD alongside Article schema.

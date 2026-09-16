@@ -308,6 +308,8 @@ function pageData(r: Crawled, p: ParsedPage | null) {
     ogImage: p?.ogImage ?? null,
     h1Count: p?.h1s.length ?? 0,
     h2Count: p?.h2s.length ?? 0,
+    h2s: p?.h2s.slice(0, 25) ?? [],
+    textSample: p?.textSample ?? null,
     imageCount: p?.images.length ?? 0,
     imagesMissingAlt: p?.imagesMissingAlt ?? 0,
     hasViewport: p?.hasViewport ?? false,

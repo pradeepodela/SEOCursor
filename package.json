@@ -21,7 +21,9 @@
     "hydrate-check": "node scripts/hydrate-check.mjs",
     "dev:clean": "rm -rf node_modules/.vite .astro && astro dev",
     "keyword-check": "node scripts/keyword-check.mjs",
-    "db-retry-check": "node scripts/db-retry-check.mjs"
+    "db-retry-check": "node scripts/db-retry-check.mjs",
+    "fact-check": "node scripts/fact-check.mjs",
+    "link-check": "node scripts/link-check.mjs"
   },
   "dependencies": {
     "@astrojs/node": "^9.5.5",

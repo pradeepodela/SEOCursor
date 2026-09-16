@@ -27,7 +27,7 @@ export const POST: APIRoute = async ({ request }) => {
   });
 
   try {
-    const { piece, outline, usage, model } = await generateBlog(siteId, ideaId, (phase) => {
+    const { piece, outline, usage, model, suspicions, grade, schema } = await generateBlog(siteId, ideaId, (phase) => {
       void db.generationJob.update({ where: { id: job.id }, data: { phase } }).catch(() => {});
     });
 
@@ -52,6 +52,12 @@ export const POST: APIRoute = async ({ request }) => {
       costUsd: usage.costUsd,
       sections: outline.sections.length,
       internalLinks: outline.internalLinks.length,
+      audience: outline.audience || null,
+      // Surfaced, never silently dropped: a claim the writer could not support
+      // is the one thing a person must look at before this is published.
+      needsChecking: suspicions,
+      checks: grade.checks,
+      schema,
       html: mdToHtml(piece.body),
     }, 201);
   } catch (e) {

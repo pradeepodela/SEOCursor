@@ -210,6 +210,13 @@ model Page {
   externalLinks Int @default(0)
   inboundLinks  Int @default(0)
 
+  // What the page actually says. Kept so content generation can be grounded in
+  // the site's own words instead of the model's assumptions about the product —
+  // an ungrounded draft invents features, and invented features are worse than
+  // no draft at all.
+  h2s         String[] @default([])
+  textSample  String?
+
   schemaTypes String[] @default([])
   indexable   Boolean  @default(true)
   canonical   String?

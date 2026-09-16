@@ -273,7 +273,20 @@ export async function complete(opts: Omit<ChatOptions, 'json'>): Promise<LlmResu
  * defensive; a failure here should say what came back, not just "invalid JSON".
  */
 export async function completeJson<T>(opts: Omit<ChatOptions, 'json'>): Promise<LlmResult<T>> {
-  const r = await chat({ ...opts, json: true });
+  let r: Awaited<ReturnType<typeof chat>>;
+  try {
+    r = await chat({ ...opts, json: true });
+  } catch (e) {
+    // Constrained JSON decoding fails intermittently on long prompts. One
+    // retry with the requirement restated last is cheaper than losing the
+    // generation, and it succeeds far more often than not.
+    if (!/failed to generate json/i.test((e as Error).message)) throw e;
+    r = await chat({
+      ...opts,
+      json: true,
+      messages: [...opts.messages, { role: 'user', content: 'Respond with the JSON object only. No prose, no code fences.' }],
+    });
+  }
   const cleaned = stripFences(r.content);
 
   try {

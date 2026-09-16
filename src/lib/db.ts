@@ -29,6 +29,10 @@ const READS = new Set([
 
 export const RETRY_ATTEMPTS = 3;
 
+/** How many times a dropped connection has been ridden out since boot. */
+let retries = 0;
+export const retryCount = (): number => retries;
+
 /**
  * Exported so the retry policy can be tested without a database — the logic is
  * only worth having if it is the same logic the client actually runs.
@@ -54,6 +58,13 @@ function build(): PrismaClient {
           } catch (e) {
             lastError = e;
             if (!shouldRetry(operation, (e as Error)?.message ?? '')) throw e;
+
+            // Log it: a retry that works is invisible, and silently swallowing
+            // a dropped connection would hide a database that is genuinely
+            // struggling behind a page that merely feels slow.
+            retries++;
+            console.warn(`[db] ${operation} hit a dropped connection, retry ${attempt + 1}/${RETRY_ATTEMPTS} (${retries} total this process)`);
+
             // Neon needs a moment to wake; backing off beats hammering it.
             await new Promise((r) => setTimeout(r, backoffMs(attempt)));
           }
