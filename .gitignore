@@ -7,3 +7,9 @@ dist/
 
 # Crawlee scratch storage (we run in-memory, but be safe)
 storage/
+
+# MCP build output — regenerate with `npm run build:mcp`.
+# The views are ~680 KB each because React is inlined into every one; that is
+# a build artifact, not source.
+bin/
+src/mcp/apps/dist/

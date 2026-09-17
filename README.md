@@ -163,7 +163,187 @@ Every route validates with Zod and returns `{ ok, data }` or `{ ok: false, error
 | `/api/wordpress/connect` | POST / DELETE | Connect or remove WordPress |
 | `/api/settings/models` | POST | Choose which models to use |
 | `/api/scheduler/tick` | POST | Run due scheduled items — the cron entry point |
-| `/api/mcp/manifest` | GET | The MCP tool and resource contract |
+| `/api/mcp` | POST | MCP over Streamable HTTP — the transport itself |
+| `/api/mcp/manifest` | GET | The MCP contract, readable in a browser |
+
+## MCP
+
+The workspace is one client of this data. An agent is another.
+
+Everything the UI can do is exposed as MCP tools — 25 of them — so Claude,
+Cursor or anything else that speaks MCP can crawl a site, read the findings,
+look at what ranks, write a post and publish it. Tools call `src/lib` directly
+rather than looping back through the HTTP API, because the stdio transport runs
+as a bare node process with no server in front of it.
+
+### Interactive views
+
+Four tools ship as **MCP Apps** — they return an interactive view the host
+renders inline, not just text:
+
+| Tool | View |
+| --- | --- |
+| `audit_site` | Findings by severity and category, with a one-click resolve |
+| `get_pages` | Sortable table of every crawled page |
+| `get_rankings` | Queries from Search Console, page-two near-misses called out |
+| `list_ideas` | Ideas with their evidence, and a button to write or dismiss one |
+
+Each view is one self-contained HTML file with React and the CSS inlined. That
+is not an optimisation — an MCP App runs in a sandboxed iframe with no
+same-origin server and a default CSP of `default-src 'none'`, so an external
+script or stylesheet is blocked silently and the panel renders blank. The views
+take their colours from the host's own design tokens, so they match the
+surrounding client in light and dark.
+
+Every one of those tools also returns a complete written answer, so a client
+with no MCP Apps support gets the same information from the same call.
+
+### Connecting
+
+```bash
+npm run build:mcp                 # required once — builds the views and the binary
+
+# Claude Code
+claude mcp add seo-cursor -- node "$PWD/bin/seo-mcp.mjs"
+```
+
+Or in a desktop client's config:
+
+```json
+{
+  "mcpServers": {
+    "seo-cursor": {
+      "command": "node",
+      "args": ["/absolute/path/to/bin/seo-mcp.mjs"]
+    }
+  }
+}
+```
+
+The binary reads this workspace's own database, so it needs `DATABASE_URL` —
+run it from the project directory and it picks that up from `.env`.
+
+### Over HTTP
+
+The same server is served at `POST /api/mcp` by the Astro app, for clients that
+connect to a URL rather than spawning a process:
+
+```bash
+claude mcp add --transport http seo-cursor http://localhost:4330/api/mcp
+```
+
+**This one is guarded, and deliberately so.** These tools crawl other people's
+websites, spend LLM and DataForSEO credits, and can publish to a live
+WordPress site — an open endpoint is a stranger's budget and byline. In
+production it refuses to serve without `MCP_TOKEN` set, sent as
+`Authorization: Bearer <token>`; and because a browser will happily attach
+credentials to a cross-origin request, non-localhost `Origin` headers are
+rejected unless listed in `MCP_ALLOWED_ORIGINS`. Locally, with no token
+configured, neither applies.
+
+### What it will not tell you
+
+The same rule the rest of the workspace follows. Tools report what was
+measured, and say so when a number is a lower bound: ask for pages after a
+crawl that hit its page cap and the result states that inbound-link counts are
+incomplete, so an agent does not read a low count as an orphan page and
+recommend deleting a well-linked page. Search Console tools fail with an
+explanation rather than returning an empty list that reads like "you rank for
+nothing". Backlink authority is absent, because a crawl cannot observe it.
+
+`npm run mcp-check` speaks raw JSON-RPC at the server and verifies the
+handshake, the tool list, the `ui://` resources and a real tool call against
+the live database. It also asserts that the published contract in
+`src/lib/mcp.ts` and the tools the server actually registers are the same set,
+so a tool cannot be added without being documented.
+
+## Deploying
+
+**Railway, not Vercel.** Four things here need a persistent process, and
+serverless breaks all of them: crawls run detached from the request that starts
+them (`void runCrawl(...)` — a serverless function is frozen the moment it
+responds, leaving the job stuck in `RUNNING`), Chromium does not fit in a
+250 MB function bundle, `generate_blog` runs for a minute or two, and the MCP
+views are read from disk at request time so file tracing never bundles them.
+Any persistent-container host works — Railway, Render, Fly, a VPS.
+
+The repo ships a `Dockerfile` and `railway.toml`. Point Railway at the repo and
+it builds from the Dockerfile.
+
+### The image
+
+Built on `mcr.microsoft.com/playwright:v1.63.0-noble` rather than a slim Node
+base, because the crawler switches to a headless browser for client-rendered
+sites and Chromium needs system libraries no slim image ships. **The tag must
+match the `playwright` version in package.json exactly** — a mismatch surfaces
+as "Executable doesn't exist" at crawl time, not at deploy time.
+
+### Environment
+
+| Variable | Needed | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | always | Neon pooled, `pgbouncer=true` |
+| `DIRECT_URL` | always | Non-pooled, for `prisma db push` |
+| `MCP_TOKEN` | always | **`/api/mcp` returns 503 without it in production.** Send as `Authorization: Bearer` |
+| `CRON_SECRET` | always | Or the scheduler endpoint takes local requests only — and cron runs in a different container |
+| `GROQ_API_KEY` / `OPENROUTER_API_KEY` | for writing | At least one |
+| `GOOGLE_CLIENT_ID` / `_SECRET` | for Search Console | |
+| `GOOGLE_REDIRECT_URI` | for Search Console | **Must change to the deployed domain**, and be re-added in Google Cloud Console, or OAuth breaks |
+| `DATAFORSEO_LOGIN` / `_PASSWORD` | for keyword research | |
+| `MCP_ALLOWED_ORIGINS` | rarely | Browser origins allowed to reach `/api/mcp`. Hostnames, comma-separated |
+
+`HOST` and `PORT` are set by the Dockerfile and Railway; leave them alone.
+
+Do not set `DISABLE_SCHEDULER` — the in-app timer is already the wrong thing in
+production, and the cron service below replaces it.
+
+### The scheduler needs its own service
+
+Railway triggers a cron by running a service's start command, and a service
+whose process stays up blocks its own next run — so a cron cannot share a
+service with a web server. Add a **second** service from the same repo:
+
+- Start command: `npm run scheduler:tick`
+- Cron schedule: `*/15 * * * *`
+- Env: `CRON_SECRET` (same value as the web service) and
+  `SCHEDULER_URL` set to the web service's public URL
+
+It fires one tick and exits. `ranAt` makes the endpoint idempotent, so an extra
+firing is harmless, and a non-zero exit shows the run as failed rather than
+silently passing.
+
+> One trap worth knowing: Astro's `security.checkOrigin` is on by default and
+> rejects a `POST` carrying no `content-type` as a cross-site form submission —
+> a 403 raised before the route's own auth runs. A hand-rolled
+> `curl -X POST -H "authorization: Bearer ..."` against `/api/scheduler/tick`
+> therefore fails, and looks like an auth problem when it never reached the
+> route. Send `content-type: application/json` too; `npm run scheduler:tick`
+> already does.
+
+### After the first deploy
+
+```bash
+npx prisma db push                                    # once, against DIRECT_URL
+MCP_TOKEN=... npm run deploy-check https://your-app.up.railway.app
+```
+
+`deploy-check` verifies the server is up, that `/api/mcp` refuses
+unauthenticated calls, that the handshake and tool list work, that the `ui://`
+views actually made it into the image, and that the database is attached — the
+things that break between a green build and a working deployment.
+
+Then connect an agent to it:
+
+```bash
+claude mcp add --transport http seo-cursor https://your-app.up.railway.app/api/mcp \
+  --header "Authorization: Bearer $MCP_TOKEN"
+```
+
+### Sizing
+
+Chromium plus a 500-page crawl is the memory ceiling, not the web server. Start
+at 1 GB and watch the first real crawl. Keep it at one instance: crawl jobs are
+claimed without a database lock, so two instances would race on the same job.
 
 ## Scripts
 
@@ -174,6 +354,10 @@ npm run uicheck [domain]         # fetch every screen and report what rendered
 npm run smoke                    # end-to-end check (needs the dev server)
 npm run purge-mock               # delete everything not produced by a crawl
 npm run llm-check                # show provider key status and model routing
+npm run build:mcp                # build the MCP app views and the stdio binary
+npm run mcp-check                # speak JSON-RPC at the MCP server and verify it
+npm run deploy-check <url>       # verify a deployed instance from outside
+npm run scheduler:tick           # fire the scheduler once and exit (the cron entry point)
 ```
 
 ## Structure
@@ -197,6 +381,13 @@ src/lib/scheduler.ts       the scheduled-day runner
 src/lib/schemas.ts         Zod schemas and API helpers
 src/pages/                 routes and API endpoints
 src/islands/               React: onboarding, audit board, GSC panel
+src/mcp/
+  server.ts                the MCP server — one factory, both transports
+  context.ts               site resolution and tool-result helpers
+  stdio.ts                 stdio entry point, bundled to bin/seo-mcp.mjs
+  tools/                   tool handlers, calling src/lib directly
+  apps/registry.ts         the ui:// catalogue
+  apps/src/                the interactive views (React)
 ```
 
 ## Keyword research

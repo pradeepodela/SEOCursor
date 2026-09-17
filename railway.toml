@@ -1,0 +1,35 @@
+# Railway deployment — the web service.
+#
+# Docker rather than Railpack: the crawler needs Chromium's system libraries,
+# and the Playwright base image in the Dockerfile is the reliable way to get
+# them. Railpack would build a working Node server that fails the moment it
+# meets a client-rendered site.
+#
+# The scheduler is NOT configured here. Railway triggers a cron by running a
+# service's start command, and a service whose process stays up blocks its own
+# next run — so a cron cannot share a service with a web server. It gets its own
+# service; see the deployment section of README.md.
+#
+# Note: Railway is migrating config-as-code to .railway/railway.ts, with this
+# format sunsetting on 2026-12-01. It works today; migrate before then.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Serves static JSON with no database call, so it answers while Neon is waking
+# and reports the web server's health rather than the database's.
+healthcheckPath = "/api/mcp/manifest"
+healthcheckTimeout = 30
+
+# A crawl runs detached from the request that started it, so a process that dies
+# mid-crawl leaves a CrawlJob row stuck in RUNNING. Restarting does not rescue
+# that row, but it keeps the next crawl, the API and the MCP endpoint available.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Deliberately left at one instance. Crawl jobs are claimed without a database
+# lock and the scheduler is idempotent only by date, so two instances would race
+# on the same job. If you scale out later, fix that first — replica count is set
+# per-region in the dashboard, not here.

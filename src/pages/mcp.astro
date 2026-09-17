@@ -2,34 +2,36 @@
 import App from '../layouts/App.astro';
 import Icon from '../components/Icon.astro';
 import { resolveSite } from '../lib/site';
-import { MCP_TOOLS, MCP_RESOURCES, MCP_GROUPS } from '../lib/mcp';
+import { MCP_TOOLS, MCP_RESOURCES, MCP_GROUPS, MCP_APPS } from '../lib/mcp';
 
 const { site } = await resolveSite(Astro);
 if (!site) return Astro.redirect('/connect');
 
+const cwd = process.cwd();
+
+/** What a desktop client actually needs. The stdio binary reads this
+ * workspace's own database, so it runs from this directory. */
 const config = `{
   "mcpServers": {
     "seo-cursor": {
-      "command": "npx",
-      "args": ["-y", "@seocursor/mcp"],
-      "env": {
-        "SEO_CURSOR_API_KEY": "sk_live_••••••••••••••••",
-        "SEO_CURSOR_SITE": "${site.domain}"
-      }
+      "command": "node",
+      "args": ["${cwd}/bin/seo-mcp.mjs"]
     }
   }
 }`;
 
+const cliCommand = `claude mcp add seo-cursor -- node ${cwd}/bin/seo-mcp.mjs`;
+
 const GROUP_TONE: Record<string, string> = {
   Crawl: 'blue', Audit: 'amber', 'Search data': 'cyan',
-  Competitors: 'violet', Strategy: 'green', Content: 'blue', Write: 'red',
+  Keywords: 'violet', Content: 'green', Write: 'red',
 };
 ---
 <App active="mcp" title="MCP Server">
   <div class="page-head">
     <div>
       <h1 class="h1">MCP Server</h1>
-      <p class="sub">The contract this workspace exposes. The manifest is served today; the MCP transport is a later step.</p>
+      <p class="sub">Everything this workspace can do, exposed to any MCP client over stdio or HTTP. Four tools also render interactive views in hosts that support MCP Apps.</p>
     </div>
     <a class="btn" href="/api/mcp/manifest" target="_blank"><Icon name="code" size={13} />View manifest</a>
   </div>
@@ -49,7 +51,7 @@ const GROUP_TONE: Record<string, string> = {
       <div class="card-head">
         <div>
           <div class="card-title">Tools</div>
-          <div class="card-sub">{MCP_TOOLS.filter(t => t.live).length} of {MCP_TOOLS.length} backed by real data today</div>
+          <div class="card-sub">{MCP_TOOLS.length} tools, all backed by real data</div>
         </div>
       </div>
       <div>
@@ -61,9 +63,10 @@ const GROUP_TONE: Record<string, string> = {
             {MCP_TOOLS.filter((t) => t.group === g).map((t) => (
               <div style="padding:11px 18px;border-bottom:1px solid var(--line-2)">
                 <div class="row" style="flex-wrap:wrap">
-                  <span class="mono" style={`font-size:12.5px;font-weight:600;color:${t.live ? 'var(--blue)' : 'var(--ink-4)'}`}>{t.name}</span>
+                  <span class="mono" style="font-size:12.5px;font-weight:600;color:var(--blue)">{t.name}</span>
                   <span class={`badge ${t.readOnly ? 'gray' : GROUP_TONE[g]}`}>{t.readOnly ? 'read' : 'write'}</span>
-                  {!t.live && <span class="badge gray">soon</span>}
+                  {t.app && <span class="badge violet">app</span>}
+                  {t.costly && <span class="badge amber">costs money</span>}
                 </div>
                 <div style="font-size:12.5px;color:var(--ink-3);margin-top:4px;line-height:1.5">{t.description}</div>
                 <div class="mono" style="font-size:11px;color:var(--ink-4);margin-top:5px">
@@ -83,8 +86,7 @@ const GROUP_TONE: Record<string, string> = {
           {MCP_RESOURCES.map((r) => (
             <div style="padding:9px 18px;border-bottom:1px solid var(--line-2)">
               <div class="row">
-                <span class="mono" style={`font-size:12.5px;font-weight:600;color:${r.live ? 'var(--violet)' : 'var(--ink-4)'}`}>{r.uri}</span>
-                {!r.live && <span class="badge gray">soon</span>}
+                <span class="mono" style="font-size:12.5px;font-weight:600;color:var(--violet)">{r.uri}</span>
               </div>
               <div style="font-size:12px;color:var(--ink-3);margin-top:3px;line-height:1.45">{r.description}</div>
             </div>
@@ -93,11 +95,34 @@ const GROUP_TONE: Record<string, string> = {
       </div>
 
       <div class="card">
+        <div class="card-head"><div class="card-title">Interactive views</div></div>
+        <div style="padding:4px 0">
+          {MCP_APPS.map((a) => (
+            <div style="padding:9px 18px;border-bottom:1px solid var(--line-2)">
+              <div class="row">
+                <span class="mono" style="font-size:12px;font-weight:600;color:var(--green)">{a.tool}</span>
+                <span class="badge violet">app</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink-3);margin-top:3px;line-height:1.45">{a.description}</div>
+            </div>
+          ))}
+          <div style="padding:10px 18px;font-size:11.5px;color:var(--ink-4);line-height:1.5">
+            Hosts that support MCP Apps render these inline. Everywhere else the same tools return a written answer.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-head">
           <div class="card-title">Connect a client</div>
           <button class="btn btn-sm" id="copyCfg">Copy</button>
         </div>
-        <pre style="margin:0;padding:14px 16px;font-family:var(--mono);font-size:11.5px;line-height:1.65;color:var(--ink-2);overflow-x:auto;background:var(--surface-2);border-radius:0 0 12px 12px"><code id="cfg">{config}</code></pre>
+        <div style="padding:12px 16px 0">
+          <div style="font-size:11.5px;color:var(--ink-4);margin-bottom:6px">Claude Code, in one command:</div>
+          <pre style="margin:0 0 12px;padding:9px 11px;font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--ink-2);overflow-x:auto;background:var(--surface-2);border:1px solid var(--line-2);border-radius:7px"><code>{cliCommand}</code></pre>
+          <div style="font-size:11.5px;color:var(--ink-4);margin-bottom:6px">Or in a client's config file:</div>
+        </div>
+        <pre style="margin:0;padding:0 16px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.65;color:var(--ink-2);overflow-x:auto"><code id="cfg">{config}</code></pre>
       </div>
 
       <div class="card">

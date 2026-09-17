@@ -7,8 +7,16 @@ export const prerender = false;
 /**
  * Cron entry point.
  *
- * Point a real scheduler at this — Vercel Cron, GitHub Actions, or plain crontab:
- *   curl -X POST -H "authorization: Bearer $CRON_SECRET" https://.../api/scheduler/tick
+ * Point a real scheduler at this — Railway cron, GitHub Actions, or plain crontab:
+ *
+ *   curl -X POST -H "authorization: Bearer $CRON_SECRET" \
+ *        -H "content-type: application/json" https://.../api/scheduler/tick
+ *
+ * The content-type is required, not decoration. Astro's `security.checkOrigin`
+ * is on by default and rejects a POST that arrives with no content-type as a
+ * cross-site form submission — a 403 raised before this route runs at all, so
+ * the tick looks unauthorised when it was never even reached. `npm run
+ * scheduler:tick` sends it correctly.
  *
  * Guarded by CRON_SECRET. Without that variable set, only local requests are
  * accepted, so an unprotected deployment cannot be triggered by anyone.

@@ -5,7 +5,13 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "node scripts/build-mcp.mjs && astro build",
+    "build:mcp": "node scripts/build-mcp.mjs",
+    "dev:mcp": "node scripts/build-mcp.mjs --watch",
+    "mcp": "node bin/seo-mcp.mjs",
+    "mcp-check": "node scripts/mcp-check.mjs",
+    "scheduler:tick": "node scripts/scheduler-tick.mjs",
+    "deploy-check": "node scripts/deploy-check.mjs",
     "preview": "node ./dist/server/entry.mjs",
     "astro": "astro",
     "db:push": "prisma db push",
@@ -29,6 +35,9 @@
     "@astrojs/node": "^9.5.5",
     "@astrojs/react": "^4.4.2",
     "@crawlee/playwright": "^3.18.1",
+    "@modelcontextprotocol/core": "^2.0.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@prisma/client": "^6.19.3",
     "astro": "^5.18.2",
     "cheerio": "^1.2.0",
@@ -36,7 +45,8 @@
     "playwright": "^1.63.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "zod4": "npm:zod@^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",
