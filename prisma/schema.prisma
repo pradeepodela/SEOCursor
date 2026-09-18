@@ -455,6 +455,24 @@ model ContentPiece {
   scheduledFor  DateTime?
   publishedAt   DateTime?
 
+  // WordPress taxonomy, held by name rather than by ID.
+  //
+  // Names are what a person and a model both reason about, and they survive a
+  // site being reconnected or rebuilt — an ID would silently point at whatever
+  // term now holds that number. They are resolved against the live site at
+  // publish time: categories must already exist, tags are created on demand,
+  // which is the convention WordPress itself follows.
+  categories String[] @default([])
+  tags       String[] @default([])
+
+  /**
+   * True while these terms are the writer's suggestion and no person has
+   * touched them. Publishing does not require review, but the UI and the MCP
+   * result both say so — the same rule the draft's claim checking follows:
+   * surface it, never silently apply it as though someone had approved it.
+   */
+  termsFromModel Boolean @default(false)
+
   /** Provenance: which model wrote this and what it cost. */
   model        String?
   promptTokens Int?

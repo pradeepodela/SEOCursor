@@ -37,14 +37,28 @@ function authorize(request: Request): Response | null {
     if (import.meta.env.PROD) {
       return json(
         503,
-        'MCP_TOKEN is not set. This endpoint exposes tools that crawl sites, spend API credits and publish content, so it refuses to serve without one. Set MCP_TOKEN in the environment and send it as `Authorization: Bearer <token>`.',
+        'MCP_TOKEN is not set. This endpoint exposes tools that crawl sites, spend API credits and publish content, so it refuses to serve without one. Set MCP_TOKEN in the environment, then send it as `Authorization: Bearer <token>` or as a `?token=` query parameter.',
       );
     }
     return null; // Local development: no token configured, no token required.
   }
 
+  // Header first — it is the right way, and the only one that keeps the token
+  // out of logs.
   const header = request.headers.get('authorization') ?? '';
-  const token = /^Bearer\s+(.+)$/i.exec(header)?.[1]?.trim();
+  const fromHeader = /^Bearer\s+(.+)$/i.exec(header)?.[1]?.trim();
+
+  // Query string as a fallback, because some clients cannot send a header at
+  // all: claude.ai's custom-connector form takes a URL and nothing else. The
+  // alternative for those clients is no authentication, which is worse.
+  //
+  // It is genuinely weaker. A URL travels through access logs, proxies and the
+  // tunnel provider in a way a header does not, so treat a token used this way
+  // as one that will leak eventually, and rotate it when the URL has served its
+  // purpose.
+  const fromQuery = new URL(request.url).searchParams.get('token')?.trim();
+
+  const token = fromHeader || fromQuery;
   if (!token || !timingSafeEqual(token, expected)) {
     return new Response(
       JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null }),

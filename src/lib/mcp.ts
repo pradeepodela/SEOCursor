@@ -57,9 +57,11 @@ export const MCP_TOOLS: McpTool[] = [
   { name: 'generate_blog', group: 'Content', description: 'Write the post for one idea: an outline grounded in the real page list, then the draft.', input: { ideaId: 'string', site: 'string?' }, readOnly: false, costly: true },
   { name: 'list_drafts', group: 'Content', description: 'Content pieces written for this website, drafted or published.', input: { site: 'string?', status: 'string?', limit: 'number?' }, readOnly: true },
   { name: 'get_draft', group: 'Content', description: 'The full body of one draft, as markdown.', input: { draftId: 'string' }, readOnly: true },
+  { name: 'list_wp_terms', group: 'Content', description: 'Every category and tag on the connected WordPress site, with how many posts use each.', input: { site: 'string?', kind: 'categories|tags|both' }, readOnly: true },
+  { name: 'set_draft_terms', group: 'Content', description: "Set a draft's WordPress categories and tags. Nothing reaches the site until it is published.", input: { draftId: 'string', categories: 'string[]?', tags: 'string[]?' }, readOnly: false },
 
   // --- write ---
-  { name: 'publish_blog', group: 'Write', description: 'Publish a draft to the connected WordPress site. Requires an explicit confirm.', input: { draftId: 'string', status: 'draft|publish|pending', confirm: 'true' }, readOnly: false, costly: true },
+  { name: 'publish_blog', group: 'Write', description: 'Publish a draft to the connected WordPress site, applying its category and tags. Requires an explicit confirm.', input: { draftId: 'string', status: 'draft|publish|pending', confirm: 'true', categories: 'string[]?', tags: 'string[]?', createCategories: 'boolean?' }, readOnly: false, costly: true },
 ];
 
 /** `ui://` views a host with MCP Apps support renders inline. */

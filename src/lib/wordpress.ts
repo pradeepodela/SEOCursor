@@ -126,7 +126,7 @@ export async function verifyConnection(baseUrl: string, username: string, appPas
     let categories: WpVerify['categories'] = [];
     try {
       const cats = await wpFetch(baseUrl, '/wp/v2/categories?per_page=50&orderby=count&order=desc', { username, appPassword });
-      categories = (cats ?? []).map((c: any) => ({ id: c.id, name: c.name, count: c.count }));
+      categories = (cats ?? []).map((c: any) => ({ id: c.id, name: decodeEntities(String(c.name ?? '')), count: c.count }));
     } catch { /* categories are optional */ }
 
     if (!me?.id) throw new Error('Signed in, but WordPress did not return a user — check the username and application password.');
@@ -145,18 +145,163 @@ export async function verifyConnection(baseUrl: string, username: string, appPas
   }
 }
 
-export type PublishResult = { id: number; link: string; status: string };
+// ---------------------------------------------------------------- taxonomy
+
+export type WpTerm = { id: number; name: string; slug: string; count: number };
+export type TermKind = 'categories' | 'tags';
+
+/**
+ * Every term of one kind on the connected site.
+ *
+ * Paged deliberately rather than taking the first hundred: a site with two
+ * hundred tags would otherwise show a truncated list that looks complete, and
+ * a person picking from it would never know the tag they wanted was missing.
+ * The cap exists only so a pathological site cannot hang the request.
+ */
+export async function listTerms(siteId: string, kind: TermKind): Promise<WpTerm[]> {
+  const conn = await db.wordPressConnection.findUnique({ where: { siteId } });
+  if (!conn) throw new Error('WordPress is not connected for this website');
+
+  const out: WpTerm[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const rows = await wpFetch(
+      conn.baseUrl,
+      `/wp/v2/${kind}?per_page=100&page=${page}&orderby=count&order=desc`,
+      { username: conn.username, appPassword: conn.appPassword },
+    );
+    if (!Array.isArray(rows) || !rows.length) break;
+    out.push(...rows.map((t: any) => ({ id: t.id, name: decodeEntities(String(t.name ?? '')), slug: t.slug, count: t.count ?? 0 })));
+    if (rows.length < 100) break;
+  }
+  return out;
+}
+
+/**
+ * WordPress returns term names HTML-encoded.
+ *
+ * A category displayed in wp-admin as "Membership & Retention" comes back from
+ * the REST API as "Membership &amp; Retention", and an apostrophe comes back as
+ * &#8217;. Comparing the raw strings means a person picking that category never
+ * matches it, and the post publishes with no category at all and no error — so
+ * decode before anything is shown or compared.
+ */
+export function decodeEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    // Ampersand last: decoding it first would turn "&amp;lt;" into a tag.
+    .replace(/&amp;/g, '&');
+}
+
+/** Compare on what a person would type, not on the wire format. */
+const sameName = (a: string, b: string) =>
+  decodeEntities(a).trim().toLowerCase() === decodeEntities(b).trim().toLowerCase();
+
+export type ResolvedTerms = {
+  ids: number[];
+  /** Names that matched nothing and were not created. */
+  missing: string[];
+  /** Names newly created on the site. */
+  created: string[];
+};
+
+/**
+ * Turn term names into the IDs the REST API requires.
+ *
+ * The two taxonomies get different treatment on purpose, following what
+ * WordPress itself does. Tags are free-form, so a name that does not exist is
+ * created. Categories are a deliberate structure that someone designed, and
+ * inventing one because a model suggested it would quietly reshape the site's
+ * navigation — so an unmatched category is reported back, not created, unless
+ * the caller explicitly asks.
+ */
+export async function resolveTerms(
+  siteId: string,
+  kind: TermKind,
+  names: string[],
+  opts: { create?: boolean } = {},
+): Promise<ResolvedTerms> {
+  const wanted = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (!wanted.length) return { ids: [], missing: [], created: [] };
+
+  const conn = await db.wordPressConnection.findUnique({ where: { siteId } });
+  if (!conn) throw new Error('WordPress is not connected for this website');
+
+  const create = opts.create ?? kind === 'tags';
+  const existing = await listTerms(siteId, kind);
+
+  const ids: number[] = [];
+  const missing: string[] = [];
+  const created: string[] = [];
+
+  for (const name of wanted) {
+    const hit = existing.find((t) => sameName(t.name, name) || sameName(t.slug, name));
+    if (hit) {
+      ids.push(hit.id);
+      continue;
+    }
+    if (!create) {
+      missing.push(name);
+      continue;
+    }
+
+    try {
+      const made = await wpFetch(conn.baseUrl, `/wp/v2/${kind}`, {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+        username: conn.username,
+        appPassword: conn.appPassword,
+      });
+      ids.push(made.id);
+      created.push(name);
+    } catch (e) {
+      // A race, or a term the account may not create. Losing one tag is not a
+      // reason to fail a publish that is otherwise ready.
+      const msg = (e as Error).message;
+      const dup = /term_exists/i.test(msg) ? null : msg;
+      if (dup) missing.push(name);
+    }
+  }
+
+  return { ids, missing, created };
+}
+
+export type PublishResult = {
+  id: number;
+  link: string;
+  status: string;
+  /** What actually landed on the post, so the caller never has to assume. */
+  terms: { categories: string[]; tags: string[]; missing: string[]; created: string[] };
+};
 
 /** Create or update the post for a piece of content. */
 export async function publishPost(
   siteId: string,
-  content: { id: string; title: string; body: string; excerpt: string | null; slug: string; wpPostId: number | null },
-  opts: { status?: 'draft' | 'publish' | 'pending' } = {},
+  content: {
+    id: string; title: string; body: string; excerpt: string | null; slug: string; wpPostId: number | null;
+    categories?: string[]; tags?: string[];
+  },
+  opts: { status?: 'draft' | 'publish' | 'pending'; createCategories?: boolean } = {},
 ): Promise<PublishResult> {
   const conn = await db.wordPressConnection.findUnique({ where: { siteId } });
   if (!conn) throw new Error('WordPress is not connected for this website');
 
   const status = opts.status ?? (conn.defaultStatus as 'draft' | 'publish' | 'pending');
+
+  const cats = await resolveTerms(siteId, 'categories', content.categories ?? [], {
+    create: opts.createCategories ?? false,
+  });
+  const tags = await resolveTerms(siteId, 'tags', content.tags ?? []);
+
+  // The configured default is a fallback for a post that names no category of
+  // its own, not an addition to one that does — otherwise every post would
+  // carry "Uncategorised" alongside whatever it actually belongs to.
+  const categoryIds = cats.ids.length ? cats.ids : conn.defaultCategory ? [conn.defaultCategory] : [];
 
   const payload: Record<string, unknown> = {
     title: content.title,
@@ -164,7 +309,8 @@ export async function publishPost(
     excerpt: content.excerpt ?? '',
     slug: content.slug,
     status,
-    ...(conn.defaultCategory ? { categories: [conn.defaultCategory] } : {}),
+    ...(categoryIds.length ? { categories: categoryIds } : {}),
+    ...(tags.ids.length ? { tags: tags.ids } : {}),
     ...(conn.defaultAuthor ? { author: conn.defaultAuthor } : {}),
   };
 
@@ -176,7 +322,19 @@ export async function publishPost(
     appPassword: conn.appPassword,
   });
 
-  return { id: res.id, link: res.link, status: res.status };
+  return {
+    id: res.id,
+    link: res.link,
+    status: res.status,
+    terms: {
+      categories: content.categories ?? [],
+      tags: content.tags ?? [],
+      // An unmatched category is the one outcome a caller must not miss: the
+      // post published, but not where they meant it to go.
+      missing: [...cats.missing, ...tags.missing],
+      created: [...cats.created, ...tags.created],
+    },
+  };
 }
 
 const stripTags = (s: string) => String(s).replace(/<[^>]*>/g, '').trim();

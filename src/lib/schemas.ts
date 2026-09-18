@@ -84,10 +84,29 @@ export const zGenerateBlog = z.object({
   ideaId: cuid,
 });
 
+/** A WordPress term name. Empty strings and duplicates are noise, not input. */
+const termName = z.string().trim().min(1).max(80);
+
 export const zPublishToWp = z.object({
   contentId: cuid,
   status: z.enum(['draft', 'publish', 'pending']).default('publish'),
   confirm: z.literal(true),
+  /** Overrides what is stored on the draft. Omit to publish with the draft's own terms. */
+  categories: z.array(termName).max(10).optional(),
+  tags: z.array(termName).max(20).optional(),
+  /**
+   * Categories are a structure someone designed. Creating one because a draft
+   * named it would reshape the site's navigation as a side effect of
+   * publishing, so it takes an explicit opt-in.
+   */
+  createCategories: z.boolean().default(false),
+});
+
+/** Set the taxonomy on a draft, before anything is published. */
+export const zSetTerms = z.object({
+  contentId: cuid,
+  categories: z.array(termName).max(10).optional(),
+  tags: z.array(termName).max(20).optional(),
 });
 
 export const zWpConnect = z.object({

@@ -14,7 +14,7 @@ import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../../lib/db';
 import { generateIdeas, saveIdeas, buildContext } from '../../lib/ideas';
 import { generateBlog } from '../../lib/blog';
-import { publishPost } from '../../lib/wordpress';
+import { publishPost, listTerms } from '../../lib/wordpress';
 import { llmConfigured, modelBlocker } from '../../lib/llm';
 import { resolveSite, result, guard, McpToolError, num } from '../context';
 
@@ -256,6 +256,9 @@ export function registerContentTools(server: McpServer): void {
           `Wrote "${piece.title}" — ${num(piece.wordCount)} words across ${num(outline.sections.length)} sections, ` +
           `${num(outline.internalLinks.length)} internal links, SEO score ${piece.seoScore}/100. ` +
           `Model ${model}, ${cost(usage.costUsd)}. Draft id ${piece.id}.\n` +
+          (piece.categories.length || piece.tags.length
+            ? `Suggested category ${piece.categories.join(', ') || '(none)'} and tags ${piece.tags.join(', ') || '(none)'} — these are the writer's proposal, not a person's choice. Adjust with \`set_draft_terms\` before publishing.\n`
+            : '') +
           (suspicions.length
             ? `${num(suspicions.length)} claim${suspicions.length === 1 ? '' : 's'} could not be supported by the site's own data and need checking before this is published:\n` +
               suspicions.map((s) => `- [${s.kind}] "${s.quote}"`).join('\n')
@@ -274,6 +277,9 @@ export function registerContentTools(server: McpServer): void {
           costUsd: usage.costUsd,
           needsChecking: suspicions,
           checks: grade.checks,
+          categories: piece.categories,
+          tags: piece.tags,
+          termsFromModel: piece.termsFromModel,
           body: piece.body,
         },
       });
@@ -324,6 +330,9 @@ export function registerContentTools(server: McpServer): void {
             costUsd: p.costUsd,
             wpUrl: p.wpUrl,
             publishError: p.publishError,
+            categories: p.categories,
+            tags: p.tags,
+            termsFromModel: p.termsFromModel,
             updatedAt: p.updatedAt.toISOString(),
           })),
         },
@@ -354,6 +363,116 @@ export function registerContentTools(server: McpServer): void {
           wordCount: piece.wordCount,
           seoScore: piece.seoScore,
           wpUrl: piece.wpUrl,
+          categories: piece.categories,
+          tags: piece.tags,
+          termsFromModel: piece.termsFromModel,
+        },
+      });
+    }),
+  );
+
+  // ------------------------------------------------------------- taxonomy
+
+  server.registerTool(
+    'list_wp_terms',
+    {
+      title: 'WordPress categories and tags',
+      description:
+        'Every category and tag on the connected WordPress site, with how many posts use each. Read this before setting terms on a draft — a category that does not exist here cannot be applied.',
+      inputSchema: z.object({
+        site: siteArg,
+        kind: z.enum(['categories', 'tags', 'both']).default('both'),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    guard(async ({ site: ref, kind }) => {
+      const site = await resolveSite(ref);
+      const wp = await db.wordPressConnection.findUnique({ where: { siteId: site.id } });
+      if (!wp) throw new McpToolError(`WordPress is not connected for ${site.domain}, so there is no taxonomy to read.`);
+
+      const [categories, tags] = await Promise.all([
+        kind === 'tags' ? Promise.resolve([]) : listTerms(site.id, 'categories'),
+        kind === 'categories' ? Promise.resolve([]) : listTerms(site.id, 'tags'),
+      ]);
+
+      const render = (label: string, rows: { name: string; count: number }[]) =>
+        rows.length
+          ? `${label} (${num(rows.length)}): ${rows.slice(0, 40).map((t) => `${t.name}${t.count ? ` [${num(t.count)}]` : ''}`).join(', ')}` +
+            (rows.length > 40 ? ` …and ${num(rows.length - 40)} more` : '')
+          : `${label}: none`;
+
+      return result({
+        summary: [
+          kind === 'tags' ? '' : render('Categories', categories),
+          kind === 'categories' ? '' : render('Tags', tags),
+        ].filter(Boolean).join('\n'),
+        data: {
+          site: { domain: site.domain },
+          categories: categories.map((t) => ({ id: t.id, name: t.name, slug: t.slug, count: t.count })),
+          tags: tags.map((t) => ({ id: t.id, name: t.name, slug: t.slug, count: t.count })),
+        },
+      });
+    }),
+  );
+
+  server.registerTool(
+    'set_draft_terms',
+    {
+      title: 'Set a draft\'s category and tags',
+      description:
+        'Set the WordPress categories and tags stored on a draft. Nothing is sent to WordPress until the draft is published. Categories must already exist on the site; tags are created on publish if they do not.',
+      inputSchema: z.object({
+        draftId: z.string().describe('Draft id, from `list_drafts`.'),
+        categories: z
+          .array(z.string().min(1).max(80))
+          .max(10)
+          .optional()
+          .describe('Category names, exactly as they appear in `list_wp_terms`. Pass [] to clear.'),
+        tags: z.array(z.string().min(1).max(80)).max(20).optional().describe('Tag names. Pass [] to clear.'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    guard(async ({ draftId, categories, tags }) => {
+      const piece = await db.contentPiece.findUnique({ where: { id: draftId } });
+      if (!piece) throw new McpToolError(`No draft with id "${draftId}".`);
+      if (categories === undefined && tags === undefined) {
+        throw new McpToolError('Pass categories, tags, or both — there is nothing to set otherwise.');
+      }
+
+      // Warn about a category that will not apply, rather than storing it and
+      // letting the publish quietly drop it.
+      let unknown: string[] = [];
+      if (categories?.length) {
+        const existing = await listTerms(piece.siteId, 'categories').catch(() => []);
+        if (existing.length) {
+          unknown = categories.filter(
+            (c) => !existing.some((t) => t.name.trim().toLowerCase() === c.trim().toLowerCase()),
+          );
+        }
+      }
+
+      const updated = await db.contentPiece.update({
+        where: { id: draftId },
+        data: {
+          ...(categories === undefined ? {} : { categories }),
+          ...(tags === undefined ? {} : { tags }),
+          termsFromModel: false,
+        },
+      });
+
+      return result({
+        summary:
+          `"${updated.title}" — category ${updated.categories.length ? updated.categories.join(', ') : '(none)'}; ` +
+          `tags ${updated.tags.length ? updated.tags.join(', ') : '(none)'}.` +
+          (unknown.length
+            ? ` Warning: ${unknown.join(', ')} ${unknown.length === 1 ? 'does' : 'do'} not exist on the site, so publishing will not apply ${unknown.length === 1 ? 'it' : 'them'} unless you create ${unknown.length === 1 ? 'it' : 'them'} in WordPress first.`
+            : ''),
+        data: {
+          id: updated.id,
+          title: updated.title,
+          categories: updated.categories,
+          tags: updated.tags,
+          unknownCategories: unknown,
         },
       });
     }),
@@ -376,10 +495,22 @@ export function registerContentTools(server: McpServer): void {
         confirm: z
           .literal(true)
           .describe('Must be true. Publishing reaches the public internet, so the caller has to mean it.'),
+        categories: z
+          .array(z.string().min(1).max(80))
+          .max(10)
+          .optional()
+          .describe("Overrides the draft's stored categories. Omit to publish with what the draft already carries."),
+        tags: z.array(z.string().min(1).max(80)).max(20).optional().describe("Overrides the draft's stored tags."),
+        createCategories: z
+          .boolean()
+          .default(false)
+          .describe(
+            'Create any category that does not exist. Off by default: a category is a structure someone designed, and inventing one reshapes the site navigation as a side effect of publishing.',
+          ),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
-    guard(async ({ draftId, status }) => {
+    guard(async ({ draftId, status, categories, tags, createCategories }) => {
       const piece = await db.contentPiece.findUnique({ where: { id: draftId } });
       if (!piece) throw new McpToolError(`No draft with id "${draftId}".`);
       if (!piece.body.trim()) throw new McpToolError('That draft has no body — generate it first.');
@@ -388,6 +519,9 @@ export function registerContentTools(server: McpServer): void {
       if (!wp) throw new McpToolError('WordPress is not connected for this website. Connect it in the workspace under Settings.');
 
       try {
+        const useCategories = categories ?? piece.categories;
+        const useTags = tags ?? piece.tags;
+
         const published = await publishPost(
           piece.siteId,
           {
@@ -397,8 +531,10 @@ export function registerContentTools(server: McpServer): void {
             excerpt: piece.excerpt,
             slug: piece.slug,
             wpPostId: piece.wpPostId,
+            categories: useCategories,
+            tags: useTags,
           },
-          { status },
+          { status, createCategories },
         );
 
         await db.contentPiece.update({
@@ -410,6 +546,9 @@ export function registerContentTools(server: McpServer): void {
             wpUrl: published.link,
             wpStatus: published.status,
             publishError: null,
+            categories: useCategories,
+            tags: useTags,
+            ...(categories || tags ? { termsFromModel: false } : {}),
           },
         });
 
@@ -418,12 +557,27 @@ export function registerContentTools(server: McpServer): void {
           await db.calendarItem.updateMany({ where: { blogIdeaId: piece.blogIdeaId }, data: { status: 'DONE' } });
         }
 
+        const t = published.terms;
         return result({
           summary:
-            status === 'publish'
+            (status === 'publish'
               ? `Published "${piece.title}" — it is now live at ${published.link}.`
-              : `Pushed "${piece.title}" to WordPress as a ${published.status}. It is not publicly visible: ${published.link}`,
-          data: { draftId, wpPostId: published.id, url: published.link, status: published.status },
+              : `Pushed "${piece.title}" to WordPress as a ${published.status}. It is not publicly visible: ${published.link}`) +
+            (useCategories.length ? ` Category: ${useCategories.join(', ')}.` : '') +
+            (useTags.length ? ` Tags: ${useTags.join(', ')}.` : '') +
+            (t.created.length ? ` Created ${t.created.length} new tag${t.created.length === 1 ? '' : 's'}: ${t.created.join(', ')}.` : '') +
+            // The post is live either way, so this is a correction to make, not
+            // a failure — but it must not pass silently.
+            (t.missing.length
+              ? ` NOT APPLIED: ${t.missing.join(', ')} — ${t.missing.length === 1 ? 'that term does' : 'those terms do'} not exist on the site. Create ${t.missing.length === 1 ? 'it' : 'them'} in WordPress, or re-publish with createCategories: true.`
+              : ''),
+          data: {
+            draftId,
+            wpPostId: published.id,
+            url: published.link,
+            status: published.status,
+            terms: t,
+          },
         });
       } catch (e) {
         const error = (e as Error).message;

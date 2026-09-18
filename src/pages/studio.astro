@@ -17,6 +17,7 @@ const docs = rows.map((r) => ({
   id: r.id, title: r.title, slug: r.slug, status: r.status, body: r.body,
   html: mdToHtml(r.body), wordCount: r.wordCount, seoScore: r.seoScore,
   targetKeyword: r.targetKeyword, excerpt: r.excerpt,
+  categories: r.categories, tags: r.tags, termsFromModel: r.termsFromModel,
   model: r.model, costUsd: r.costUsd,
   wpUrl: r.wpUrl, wpPostId: r.wpPostId, wpStatus: r.wpStatus, publishError: r.publishError,
   publishedAt: r.publishedAt?.toISOString() ?? null,

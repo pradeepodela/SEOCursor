@@ -105,6 +105,20 @@ Without `CRON_SECRET` set, that endpoint only accepts local requests — an unpr
 
 Connect WordPress in Settings with an **application password** (Users → Profile → Application Passwords), not your account password. Credentials are verified before they are stored, including whether the user can actually publish. Publish from the idea, the calendar or the studio; every path takes an explicit confirm.
 
+
+### Categories and tags
+
+Each draft carries its own category and tags, held **by name** rather than by ID — names are what a person and a model both reason about, and they survive a site being reconnected, where an ID would silently point at whatever term now holds that number.
+
+The writer proposes them. The outline pass is handed the categories that actually exist on your site and must pick one of them verbatim, so a category it invents is dropped rather than published into nothing; tags are free-form and it is asked for three to six specific ones. Nothing is applied until you publish, and the studio marks them **Suggested** until you touch them — the same rule the claim checking follows: surface it, never quietly act as though someone approved it.
+
+The two taxonomies are treated differently on publish, following what WordPress itself does:
+
+- **Tags are created** if they do not exist. That is what tags are for.
+- **Categories are not.** A category is a structure someone designed, and inventing one would reshape the site's navigation as a side effect of publishing. An unmatched category is reported back — the post is live, but not where you meant it to go — and `createCategories: true` is the explicit opt-in.
+
+Term names arrive HTML-encoded from the REST API (`Membership &amp; Retention`), so they are decoded at the boundary. Comparing the raw strings would mean a category you picked never matched, and the post publishing with no category and no error.
+
 ## Setup for step two
 
 ```
@@ -159,7 +173,9 @@ Every route validates with Zod and returns `{ ok, data }` or `{ ok: false, error
 | `/api/ideas/:id` | PATCH / DELETE | Edit or dismiss an idea |
 | `/api/ideas/schedule` | POST / DELETE | Put an idea on the calendar, or take it off |
 | `/api/blog/generate` | POST | Write the post for one idea |
+| `/api/blog/terms` | PATCH | Set a draft's WordPress categories and tags |
 | `/api/blog/publish` | POST | Push a draft to WordPress — requires `confirm: true` |
+| `/api/wordpress/terms` | GET | Categories and tags on the connected WordPress site |
 | `/api/wordpress/connect` | POST / DELETE | Connect or remove WordPress |
 | `/api/settings/models` | POST | Choose which models to use |
 | `/api/scheduler/tick` | POST | Run due scheduled items — the cron entry point |

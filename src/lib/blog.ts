@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { db } from './db';
+import { listTerms, type WpTerm } from './wordpress';
 import { completeJson, complete, type LlmUsage } from './llm';
 import { buildContext } from './ideas';
 import { gatherFacts, renderFacts, findFabrication, type SiteFacts } from './facts';
@@ -56,6 +57,19 @@ const OutlineSchema = z.object({
     ),
   ).default([]).transform((v) => v.slice(0, 10)),
   questions: z.array(clipped(200)).default([]).transform((v) => v.slice(0, 10)),
+
+  // WordPress taxonomy, proposed alongside the outline rather than in a third
+  // call. The outline pass already knows the topic, the target query and the
+  // audience, so asking it here costs nothing extra and keeps the suggestion
+  // grounded in the same reasoning that shaped the post.
+  category: clipped(80).optional().default(''),
+  tags: z.array(clipped(50)).default([]).transform((v) =>
+    // Deduplicate case-insensitively: "Astro" and "astro" are one tag to
+    // WordPress, and sending both just creates noise on the post.
+    [...new Map(v.map((t) => [t.trim().toLowerCase(), t.trim()])).values()]
+      .filter(Boolean)
+      .slice(0, 8),
+  ),
 });
 
 export type Outline = z.infer<typeof OutlineSchema>;
@@ -100,12 +114,25 @@ Search engines and AI assistants reward different things and both matter.
 questions: the specific questions this post must answer outright. These become
 an FAQ block, so each must be a real question with a short factual answer.
 
+CATEGORY AND TAGS
+category: where this post belongs on the site. If you are given a list of
+categories that exist, choose exactly one from it and copy the name verbatim —
+a name that is not on the list files the post nowhere, so an empty string is
+the better answer when nothing fits. If you are given no list, leave it empty.
+
+tags: three to six specific topics this post is actually about, as a reader
+would search for them. Tags are created on the site if they do not exist, so
+specific beats broad and restraint beats volume — "core web vitals" and
+"server-side rendering" are useful, "marketing", "business" and "tips" are
+noise that will accumulate on every post you write.
+
 Return JSON only:
 {"title":"...","slug":"...","metaDescription":"...","targetQuery":"...","intent":"INFORMATIONAL","targetWords":1500,
  "audience":"who this is written for, in one line",
  "sections":[{"heading":"...","covers":"..."}],
  "internalLinks":[{"url":"/pricing","anchor":"..."}],
- "questions":["..."]}`;
+ "questions":["..."],
+ "category":"","tags":["..."]}`;
 
 const DRAFT_SYSTEM = () => `You are writing a blog post to a supplied outline.
 
@@ -183,6 +210,12 @@ export async function buildOutline(
   const facts = await gatherFacts(siteId);
   const pageList = ctx.pages.slice(0, 50).map((p) => `  ${p.url} — "${p.title}"`).join('\n');
 
+  // The real category list, when there is a site to read it from. Asking a
+  // model to pick from an actual list is the difference between a category
+  // that files the post correctly and an invented one that quietly does
+  // nothing at publish time.
+  const wpCategories = await listTerms(siteId, 'categories').catch(() => [] as WpTerm[]);
+
   const user = [
     renderFacts(facts),
     '',
@@ -194,6 +227,10 @@ export async function buildOutline(
     '',
     'PAGES ON THIS SITE (the only URLs you may link to):',
     pageList,
+    wpCategories.length
+      ? '\nCATEGORIES THAT EXIST ON THIS SITE (pick exactly one, copied verbatim, or leave `category` empty if none fit):\n' +
+        wpCategories.slice(0, 40).map((c) => `  ${c.name}${c.count ? ` (${c.count} posts)` : ''}`).join('\n')
+      : '',
   ].filter(Boolean).join('\n');
 
   const res = await completeJson<unknown>({
@@ -212,6 +249,16 @@ export async function buildOutline(
   const real = new Set(ctx.pages.map((p) => p.url));
   parsed.data.internalLinks = parsed.data.internalLinks.filter((l) => real.has(l.url));
   parsed.data.slug = slugify(parsed.data.slug || parsed.data.title);
+
+  // Same rule for the category. A name that is not on the site would be
+  // silently ignored at publish time, so resolve it to the real spelling or
+  // drop it — an empty category is honest, a fictional one is not.
+  if (parsed.data.category && wpCategories.length) {
+    const hit = wpCategories.find(
+      (c) => c.name.trim().toLowerCase() === parsed.data.category.trim().toLowerCase(),
+    );
+    parsed.data.category = hit?.name ?? '';
+  }
 
   return { outline: parsed.data, usage: res.usage, model: res.model };
 }
@@ -312,6 +359,9 @@ export async function generateBlog(siteId: string, ideaId: string, onPhase?: (p:
         seoScore: grade.score,
         model, promptTokens: usage.promptTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd,
         status: 'DRAFT',
+        categories: outline.category ? [outline.category] : [],
+        tags: outline.tags,
+        termsFromModel: true,
       },
       create: {
         siteId, blogIdeaId: ideaId,
@@ -321,6 +371,9 @@ export async function generateBlog(siteId: string, ideaId: string, onPhase?: (p:
         status: 'DRAFT',
         seoScore: grade.score,
         model, promptTokens: usage.promptTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd,
+        categories: outline.category ? [outline.category] : [],
+        tags: outline.tags,
+        termsFromModel: true,
       },
     });
 
