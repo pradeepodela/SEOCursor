@@ -12,6 +12,10 @@
 import { db } from './db';
 import * as dfs from './dataforseo';
 import type { Market, ResearchedKeyword } from './dataforseo';
+import { historicalMetrics } from './googleAds';
+import { keywordVolume } from './bing';
+import { keywordData } from './keywordsEverywhere';
+import { accessTokenFor, ADS_SCOPE } from './google';
 
 export type ResearchSummary = {
   mode: 'site' | 'ranked' | 'seeds';
@@ -173,6 +177,153 @@ export async function enrich(siteId: string, limit: number): Promise<{ graded: n
   }
 
   await db.dataForSeoConnection.update({ where: { siteId }, data: { lastResearchAt: new Date() } });
+  return { graded, checked: pending.length };
+}
+
+/**
+ * Enrich the site's keywords with Google Ads Keyword Planner volume &
+ * competition — the free alternative to a paid provider.
+ *
+ * Google Ads measures ad competition, not SEO difficulty, so the competition
+ * index doubles as the difficulty signal here: it is the best free proxy for
+ * how contested a term is, and it drives both the chip and the opportunity
+ * score the same way a difficulty score would.
+ */
+export async function enrichWithGoogleAds(
+  siteId: string,
+  limit: number,
+): Promise<{ graded: number; checked: number }> {
+  const market = await db.googleAdsConnection.findUnique({ where: { siteId } });
+  if (!market) throw new Error('Connect a market before pulling from Google Ads');
+
+  // The Keyword Planner call needs the adwords scope, which older Search Console
+  // connections were not granted. Fail with the fix rather than a raw 401.
+  const gsc = await db.gscConnection.findUnique({ where: { siteId }, select: { scope: true } });
+  if (!gsc) throw new Error('Connect Google (Search Console) first — Keyword Planner uses the same login');
+  if (!gsc.scope.includes(ADS_SCOPE)) {
+    throw new Error('Reconnect Google to grant Keyword Planner access (the adwords permission)');
+  }
+
+  const pending = await db.keyword.findMany({
+    where: { siteId },
+    orderBy: [{ impressions: 'desc' }, { keyword: 'asc' }],
+    take: limit,
+    select: { id: true, keyword: true },
+  });
+  if (!pending.length) return { graded: 0, checked: 0 };
+
+  const token = await accessTokenFor(siteId);
+  const metrics = await historicalMetrics(
+    token,
+    { geoTarget: market.geoTarget, languageId: market.languageId },
+    pending.map((k) => k.keyword),
+  );
+  const byKeyword = new Map(metrics.map((m) => [m.keyword, m]));
+
+  const now = new Date();
+  let graded = 0;
+  for (const k of pending) {
+    const m = byKeyword.get(k.keyword.toLowerCase());
+    if (!m) continue;
+    const difficulty = m.competition != null ? Math.round(m.competition * 100) : 0;
+    await db.keyword.update({
+      where: { id: k.id },
+      data: {
+        volume: m.volume,
+        competition: m.competition,
+        cpc: m.cpc,
+        difficulty,
+        researchedAt: now,
+        opportunity: impact(m.volume, difficulty),
+        // Source is left as-is: a Search Console query stays Search Console's,
+        // we have only added the market metrics it was missing.
+      },
+    });
+    graded++;
+  }
+
+  await db.googleAdsConnection.update({
+    where: { siteId },
+    data: { lastResearchAt: now, keywordsPulled: { increment: graded }, lastError: null },
+  });
+
+  return { graded, checked: pending.length };
+}
+
+/**
+ * Enrich the site's keywords with Keywords Everywhere — Google Keyword Planner
+ * volume & competition. The most complete free-of-approval source: it returns
+ * both numbers, so the competition index also stands in as the difficulty
+ * signal (Keyword Planner reports ad competition, not SEO difficulty).
+ */
+export async function enrichWithKeywordsEverywhere(
+  siteId: string,
+  limit: number,
+): Promise<{ graded: number; checked: number }> {
+  const pending = await db.keyword.findMany({
+    where: { siteId },
+    orderBy: [{ impressions: 'desc' }, { keyword: 'asc' }],
+    take: limit,
+    select: { id: true, keyword: true },
+  });
+  if (!pending.length) return { graded: 0, checked: 0 };
+
+  const data = await keywordData(pending.map((k) => k.keyword), limit);
+
+  const now = new Date();
+  let graded = 0;
+  for (const k of pending) {
+    const m = data.get(k.keyword.toLowerCase());
+    if (!m) continue;
+    const difficulty = m.competition != null ? Math.round(m.competition * 100) : 0;
+    await db.keyword.update({
+      where: { id: k.id },
+      data: {
+        volume: m.volume,
+        competition: m.competition,
+        cpc: m.cpc,
+        difficulty,
+        researchedAt: now,
+        opportunity: impact(m.volume, difficulty),
+      },
+    });
+    graded++;
+  }
+  return { graded, checked: pending.length };
+}
+
+/**
+ * Enrich the site's keywords with Bing Webmaster search volume.
+ *
+ * Bing supplies volume but not competition, so difficulty is left untouched and
+ * the opportunity score is recomputed from the new volume against whatever
+ * difficulty we already have.
+ */
+export async function enrichWithBing(
+  siteId: string,
+  limit: number,
+): Promise<{ graded: number; checked: number }> {
+  const pending = await db.keyword.findMany({
+    where: { siteId },
+    orderBy: [{ impressions: 'desc' }, { keyword: 'asc' }],
+    take: limit,
+    select: { id: true, keyword: true, difficulty: true },
+  });
+  if (!pending.length) return { graded: 0, checked: 0 };
+
+  const volumes = await keywordVolume(pending.map((k) => k.keyword), Math.min(limit, 100));
+
+  const now = new Date();
+  let graded = 0;
+  for (const k of pending) {
+    const v = volumes.get(k.keyword.toLowerCase());
+    if (v == null) continue;
+    await db.keyword.update({
+      where: { id: k.id },
+      data: { volume: v, researchedAt: now, opportunity: impact(v, k.difficulty || null) },
+    });
+    graded++;
+  }
   return { graded, checked: pending.length };
 }
 

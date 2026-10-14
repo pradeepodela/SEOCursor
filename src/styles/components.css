@@ -182,6 +182,42 @@
 
 /* ---------------------------------------------- calendar */
 
+.cal-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; padding: 15px 18px; border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.cal-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.cal-search {
+  display: flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 10px; min-width: 210px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--ink-4);
+  transition: border-color .15s, box-shadow .15s;
+}
+.cal-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); color: var(--ink-3); }
+.cal-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 13px; color: var(--ink); }
+.cal-search input::placeholder { color: var(--ink-4); }
+.cal-search-x {
+  border: none; background: transparent; color: var(--ink-4);
+  display: grid; place-items: center; cursor: pointer; padding: 2px; border-radius: 4px;
+}
+.cal-search-x:hover { color: var(--ink-2); background: var(--surface-sunk); }
+
+.cal-nav {
+  display: inline-flex; align-items: center;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); overflow: hidden;
+}
+.cal-nav-btn {
+  height: 32px; padding: 0 11px; border: none; background: transparent;
+  font-size: 12.5px; font-weight: 550; color: var(--ink-2); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; transition: background .12s;
+}
+.cal-nav-btn:hover { background: var(--surface-sunk); }
+.cal-nav-btn:not(:last-child) { border-right: 1px solid var(--line); }
+
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
 .cal-dow {
   font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
@@ -190,7 +226,7 @@
   background: var(--surface-2);
 }
 .cal-cell {
-  min-height: 106px; padding: 6px;
+  min-height: 118px; padding: 7px;
   border-right: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2);
   display: flex; flex-direction: column; gap: 4px;
   transition: background .12s;
@@ -404,7 +440,162 @@
   background: var(--surface); border-radius: var(--r-xl);
   box-shadow: var(--shadow-lg); z-index: 91;
   display: flex; flex-direction: column; overflow: hidden;
-  animation: fadeUp .22s cubic-bezier(.22,.9,.32,1) both;
+  /* Centering lives in the transform, so the entrance animation has to carry
+     the -50%/-50% through every frame — a plain fadeUp would reset transform
+     to none on its final frame and drop the modal to the bottom-right. */
+  animation: modalIn .22s cubic-bezier(.22,.9,.32,1) both;
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+/* ---------------------------------------------- schedule-article modal */
+
+.sched-modal { width: min(820px, 95vw); }
+.sched-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+.sched-body { display: grid; grid-template-columns: 1fr 320px; min-height: 0; flex: 1; }
+.sched-left { padding: 18px 20px; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.sched-right { padding: 18px 20px; background: var(--surface-2); overflow-y: auto; }
+
+.sched-left-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
+.sched-section-title { font-size: 13px; font-weight: 650; letter-spacing: -.01em; margin-bottom: 11px; }
+.sched-left-head .sched-section-title { margin-bottom: 0; }
+.sched-refresh {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--line-strong); background: var(--surface);
+  height: 26px; padding: 0 9px; border-radius: var(--r-sm);
+  font-size: 11.5px; font-weight: 550; color: var(--ink-2); cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.sched-refresh:hover:not(:disabled) { background: var(--surface-sunk); border-color: #c5ccd8; }
+.sched-refresh:disabled { opacity: .7; cursor: default; }
+.sched-refresh .spinner { width: 12px; height: 12px; flex: 0 0 12px; color: var(--blue); }
+
+.sched-kw-search { width: 100%; margin-bottom: 12px; }
+.sched-kw-empty { display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+.sched-source {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  margin-top: 12px; padding: 8px 11px; border-radius: 8px;
+  font-size: 11.8px; line-height: 1.45;
+}
+.sched-source.warn { background: var(--amber-soft); border: 1px solid var(--amber-line); color: #92400e; }
+.sched-source.ok { background: var(--green-soft); border: 1px solid var(--green-line); color: #14532d; }
+.sched-source svg { flex: 0 0 13px; }
+.sched-source a { font-weight: 650; text-decoration: underline; margin-left: auto; white-space: nowrap; }
+
+.sched-market {
+  margin-top: 12px; padding: 11px 12px; border-radius: 10px;
+  background: var(--amber-soft); border: 1px solid var(--amber-line);
+}
+.sched-market-head {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 600; color: #92400e; margin-bottom: 9px;
+}
+.sched-market-head svg { flex: 0 0 13px; }
+.sched-market-row { display: flex; gap: 7px; flex-wrap: wrap; }
+.sched-sel {
+  flex: 1 1 120px; min-width: 0; height: 32px; padding: 0 8px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); font-size: 12.5px; color: var(--ink); cursor: pointer;
+}
+.sched-sel:disabled { background: var(--surface-sunk); color: var(--ink-4); cursor: default; }
+.sched-market-row .btn { flex: 0 0 auto; }
+.sched-market-err {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  font-size: 11.5px; color: #991b1b;
+}
+
+.sched-kw-list { flex: 1; overflow-y: auto; min-height: 150px; max-height: 340px; display: flex; flex-direction: column; gap: 6px; }
+.sched-kw-empty { font-size: 12.5px; color: var(--ink-3); padding: 20px 4px; text-align: center; line-height: 1.5; }
+
+.sched-kw {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--surface); cursor: pointer; transition: border-color .12s, background .12s;
+}
+.sched-kw:hover { border-color: var(--blue-line); background: var(--blue-soft); }
+.sched-kw.on { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); }
+.sched-kw-main { flex: 1; min-width: 0; }
+.sched-kw-name {
+  font-size: 13px; font-weight: 580; display: flex; align-items: center; gap: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sched-kw-star { color: #e0a714; display: inline-flex; }
+.sched-kw-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; }
+
+.sched-kw-foot { display: flex; gap: 8px; margin-top: 14px; }
+.sched-kw-foot .btn { flex: 1; }
+
+.sched-add { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.sched-add-ai { display: flex; gap: 8px; align-items: center; }
+.sched-seed { flex: 1; min-width: 0; height: 34px; }
+.sched-add-ai .btn { flex: 0 0 auto; }
+.sched-add-ta {
+  width: 100%; resize: vertical; min-height: 84px;
+  border: 1px solid var(--line-strong); border-radius: var(--r);
+  background: var(--surface); padding: 9px 11px;
+  font-size: 13px; line-height: 1.5; outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sched-add-ta:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+.sched-add-ta::placeholder { color: var(--ink-4); }
+.sched-add-row { display: flex; gap: 8px; justify-content: flex-end; }
+
+.sched-none { padding: 2px 0; }
+.sched-none-title { font-size: 14.5px; font-weight: 620; letter-spacing: -.01em; }
+.sched-none-body { font-size: 12.5px; color: var(--ink-3); line-height: 1.6; margin: 8px 0 0; }
+.sched-none-body b { color: var(--ink-2); font-weight: 600; }
+
+.sched-picked {
+  border: 1px solid var(--blue-line); border-radius: var(--r-lg);
+  background: linear-gradient(180deg, #f9fbff, #f4f7ff); padding: 14px 15px;
+}
+.sched-picked-name { font-size: 15px; font-weight: 640; letter-spacing: -.012em; margin: 4px 0 10px; }
+.sched-picked-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 12.5px; color: var(--ink-3); padding: 5px 0; border-top: 1px solid var(--blue-line);
+}
+.sched-picked-row b { color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+.sched-when {
+  display: flex; align-items: center; gap: 7px; margin-top: 4px;
+  font-size: 12px; color: var(--ink-3);
+}
+.sched-autopub {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 14px;
+  font-size: 12.5px; color: var(--ink-2); line-height: 1.45;
+}
+.sched-autopub input { margin-top: 2px; }
+
+.sched-err {
+  display: flex; gap: 8px; align-items: center; margin-top: 14px;
+  padding: 9px 11px; background: var(--red-soft); border: 1px solid var(--red-line);
+  border-radius: 8px; font-size: 12.5px; color: #991b1b;
+}
+
+.sched-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 13px 20px; border-top: 1px solid var(--line); background: var(--surface-2); flex: 0 0 auto;
+}
+
+.link-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; cursor: pointer;
+  font-size: 12.5px; font-weight: 550; color: var(--blue); padding: 4px 2px;
+}
+.link-btn:hover { color: var(--blue-hover); }
+.link-btn:disabled { color: var(--ink-4); cursor: not-allowed; }
+
+@media (max-width: 720px) {
+  .sched-body { grid-template-columns: 1fr; }
+  .sched-left { border-right: none; border-bottom: 1px solid var(--line); }
+  .sched-foot { flex-direction: column-reverse; align-items: stretch; }
+  .sched-foot .row { justify-content: flex-end; }
 }
 
 /* ---------------------------------------------- reasoning chain */
@@ -629,9 +820,12 @@
 
 @media (max-width: 900px) {
   :root { --rail-w: 60px; }
-  .rail-name, .rail-label, .nav-item span:not(.nav-count), .rail-foot-text { display: none; }
+  .rail-name, .rail-label, .nav-item span:not(.nav-count), .rail-foot-text,
+  .nav-new, .plan-lbl, .plan-val, .rail-user-meta { display: none; }
   .nav-item { justify-content: center; }
   .nav-count { display: none; }
+  .plan-row, .rail-user { justify-content: center; }
+  .rail-user { padding: 8px 0; }
   .canvas { padding: 18px 16px 60px; }
   .audit-sum { grid-template-columns: 1fr; }
   .studio { grid-template-columns: 1fr; }

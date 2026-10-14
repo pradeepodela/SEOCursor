@@ -133,6 +133,7 @@ model Site {
   gsc           GscConnection?
   wordpress     WordPressConnection?
   keywordProvider DataForSeoConnection?
+  googleAds     GoogleAdsConnection?
   ideas         BlogIdea[]
   generations   GenerationJob[]
   competitors   Competitor[]
@@ -753,6 +754,30 @@ model GenerationJob {
   finishedAt DateTime?
 
   @@index([siteId, startedAt])
+}
+
+/// Google Ads Keyword Planner. The developer token, OAuth client and the Ads
+/// customer id live in the environment; what is stored per site is only the
+/// market — the geo target and language the Keyword Planner prices against.
+model GoogleAdsConnection {
+  id     String @id @default(cuid())
+  siteId String @unique
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  /** Google Ads geoTargetConstant id, e.g. 2036 (Australia). */
+  geoTarget    Int
+  geoName      String
+  /** Google Ads languageConstant id, e.g. 1000 (English). */
+  languageId   Int
+  languageName String
+
+  verifiedAt     DateTime?
+  lastError      String?
+  lastResearchAt DateTime?
+  keywordsPulled Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /// DataForSEO. Credentials live in the environment like the model keys; what is

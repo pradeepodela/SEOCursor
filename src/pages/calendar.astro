@@ -1,6 +1,5 @@
 ---
 import App from '../layouts/App.astro';
-import Icon from '../components/Icon.astro';
 import CalendarBoard from '../islands/CalendarBoard';
 import { db } from '../lib/db';
 import { resolveSite } from '../lib/site';
@@ -8,13 +7,22 @@ import { resolveSite } from '../lib/site';
 const { site } = await resolveSite(Astro);
 if (!site) return Astro.redirect('/connect');
 
-const [rows, wp] = await Promise.all([
+const [rows, wp, keywordRows] = await Promise.all([
   db.calendarItem.findMany({
     where: { siteId: site.id },
     include: { blogIdea: true, content: true },
     orderBy: { date: 'asc' },
   }),
   db.wordPressConnection.findUnique({ where: { siteId: site.id } }),
+  db.keyword.findMany({
+    where: { siteId: site.id },
+    orderBy: [{ volume: 'desc' }, { impressions: 'desc' }, { keyword: 'asc' }],
+    take: 300,
+    select: {
+      id: true, keyword: true, volume: true, difficulty: true, competition: true,
+      impressions: true, position: true, opportunity: true, intent: true, tracked: true,
+    },
+  }),
 ]);
 
 const items = rows.map((r) => ({
@@ -35,29 +43,37 @@ const items = rows.map((r) => ({
   targetQuery: r.blogIdea?.targetQuery ?? null,
 }));
 
-const pending = rows.filter((r) => !r.ranAt && r.status !== 'DONE').length;
+/** Turn a 0–1 competition (or difficulty) into the Low / Medium / High chip. */
+function competitionLabel(competition: number | null, difficulty: number): 'Low' | 'Medium' | 'High' | 'N/A' {
+  const score = competition != null ? competition * 100 : difficulty || 0;
+  if (competition == null && !difficulty) return 'N/A';
+  if (score < 34) return 'Low';
+  if (score < 67) return 'Medium';
+  return 'High';
+}
+
+const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
+
+const keywords = keywordRows.map((k) => ({
+  id: k.id,
+  keyword: k.keyword,
+  volume: k.volume,
+  difficulty: k.difficulty,
+  competition: competitionLabel(k.competition, k.difficulty),
+  impressions: k.impressions,
+  position: k.position,
+  opportunity: titleCase(k.opportunity) as 'High' | 'Medium' | 'Low',
+  source: (k.volume > 0 ? 'volume' : k.impressions > 0 ? 'gsc' : 'none') as 'volume' | 'gsc' | 'none',
+  intent: k.intent,
+  tracked: k.tracked,
+}));
 ---
 <App active="calendar" title="Content Calendar">
-  <div class="page-head">
-    <div>
-      <h1 class="h1">Content calendar</h1>
-      <p class="sub">
-        {pending} scheduled · items generate themselves on their day
-      </p>
-    </div>
-    <a class="btn btn-primary" href={`/ideas?site=${site.id}`}><Icon name="plus" size={13} />Schedule a post</a>
-  </div>
-
-  {items.length === 0 ? (
-    <div class="locked" style="padding:44px 22px">
-      <div class="locked-title">Nothing scheduled</div>
-      <div class="locked-body">
-        Generate blog titles, then schedule the ones you want. On the day, each one writes itself —
-        and publishes too, if you asked it to.
-      </div>
-      <a class="btn btn-primary" style="margin-top:16px" href={`/ideas?site=${site.id}`}>Go to ideas</a>
-    </div>
-  ) : (
-    <CalendarBoard client:load items={items} siteId={site.id} wpReady={!!wp} />
-  )}
+  <CalendarBoard
+    client:load
+    items={items}
+    siteId={site.id}
+    wpReady={!!wp}
+    keywords={keywords}
+  />
 </App>

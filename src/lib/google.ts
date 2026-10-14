@@ -10,6 +10,10 @@ import { db } from './db';
  */
 
 export const GSC_SCOPE = 'https://www.googleapis.com/auth/webmasters.readonly';
+/** Keyword Planner (volume & competition) rides on the same Google login. */
+export const ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
+/** Scopes requested at consent. Read-only Search Console + Keyword Planner. */
+export const OAUTH_SCOPES = `${GSC_SCOPE} ${ADS_SCOPE}`;
 
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -66,7 +70,7 @@ export function authUrl(siteId: string): string {
     client_id: cfg.clientId,
     redirect_uri: cfg.redirectUri,
     response_type: 'code',
-    scope: GSC_SCOPE,
+    scope: OAUTH_SCOPES,
     access_type: 'offline',       // we need a refresh token
     prompt: 'consent',            // force one so re-connecting always works
     include_granted_scopes: 'true',

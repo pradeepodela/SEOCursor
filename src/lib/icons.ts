@@ -42,6 +42,9 @@ export const ICONS: Record<string, string> = {
   play: 'M5 3l14 9-14 9z',
   bolt: 'M13 2 3 14h9l-1 8 10-12h-9z',
   minus: 'M5 12h14',
+  grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+  lifebuoy: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M4.9 4.9l4.3 4.3M14.8 14.8l4.3 4.3M14.8 9.2l4.3-4.3M4.9 19.1l4.3-4.3',
+  star: 'M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z',
 };
 
 export type IconName = keyof typeof ICONS;

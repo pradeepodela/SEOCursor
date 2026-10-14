@@ -79,6 +79,24 @@ export const zScheduleIdea = z.object({
   autoPublish: z.boolean().default(false),
 });
 
+/**
+ * Schedule a brand-new article straight from the calendar. A target keyword is
+ * optional; the title is what the writer actually needs on the day, so when no
+ * title is typed the keyword stands in for it.
+ */
+export const zScheduleNewArticle = z
+  .object({
+    siteId: cuid,
+    title: z.string().trim().max(180).optional().default(''),
+    keyword: z.string().trim().max(160).optional().default(''),
+    date: z.coerce.date(),
+    autoPublish: z.boolean().default(false),
+  })
+  .refine((v) => (v.title.length >= 3 || v.keyword.length >= 2), {
+    message: 'Pick a keyword or give the article a topic',
+    path: ['title'],
+  });
+
 export const zGenerateBlog = z.object({
   siteId: cuid,
   ideaId: cuid,

@@ -108,8 +108,29 @@ Search engines and AI assistants reward different things and both matter.
   India?" is a heading.
 - Include one section that is useful but commercially inconvenient — a limit, a
   case where the reader should not buy. It earns trust and it earns citations.
-- Only propose internal links to URLs in the page list you are given.
 - targetWords should reflect what the topic needs, not a house minimum.
+
+INTERNAL LINKING — weave the post into the site, do not leave it an island
+You are given this site's pages and the articles it has already published. Plan
+the post so a reader can go deeper and so authority flows to the pages that earn
+the business money. This is a ranking signal and a navigation aid — treat it as
+part of the plan, not an afterthought.
+- Plan 3 to 8 internal links, roughly one for every 250-300 words of the post.
+  Never zero when relevant targets exist; never a cluster of links in one spot.
+- Every link must point to a URL in the lists you are given. A link to anything
+  else is dropped, so do not invent one.
+- Pick the single most relevant target for each link. One precise, on-topic link
+  is worth more than three loosely-related ones.
+- At least one link should go to a product, pricing or feature page where the
+  topic naturally leads the reader toward acting — but only where it genuinely
+  fits, never bolted on.
+- Use the remaining links to connect to related articles on the same topic, so
+  the posts reinforce each other as a cluster.
+- anchor is the descriptive words a sentence would naturally use for the
+  destination — its topic or keyword, 2 to 6 words. Never "click here", "read
+  more", "this page", "here", "learn more", or the bare URL.
+- Each destination is linked once. Spread the links across the sections where
+  they help, not all in the intro.
 
 questions: the specific questions this post must answer outright. These become
 an FAQ block, so each must be a real question with a short factual answer.
@@ -130,7 +151,7 @@ Return JSON only:
 {"title":"...","slug":"...","metaDescription":"...","targetQuery":"...","intent":"INFORMATIONAL","targetWords":1500,
  "audience":"who this is written for, in one line",
  "sections":[{"heading":"...","covers":"..."}],
- "internalLinks":[{"url":"/pricing","anchor":"..."}],
+ "internalLinks":[{"url":"/pricing","anchor":"descriptive keyword-rich anchor"},{"url":"https://site/blog/related-post","anchor":"the related topic in a few words"}],
  "questions":["..."],
  "category":"","tags":["..."]}`;
 
@@ -191,9 +212,16 @@ VOICE
 - No "In conclusion", no "In today's fast-paced world", no restating the intro.
 - No em-dash-heavy AI cadence, no "delve", no "landscape", no "game-changer",
   no "it's not just X, it's Y".
-- Every internal link listed below must appear in the finished article, placed
-  where it genuinely helps. They are not optional. Never link to a URL not in
-  the list.
+INTERNAL LINKS
+- Place every internal link from the list, inside a sentence where it helps the
+  reader go deeper — mid-paragraph, in the section it belongs to. Never in a
+  heading, never stacked in the intro, never dumped in a "related links" list.
+- The anchor is the descriptive words already in your sentence that name what is
+  on the other end — the destination's topic or keyword. Rewrite the sentence so
+  those words appear naturally, then link them. Never "click here", "read more",
+  "this page", "here", "learn more", or a bare URL.
+- Link each URL once. These links are not optional, and you must never link to a
+  URL that is not in the list.
 
 End with an H2 "Frequently asked questions" containing each supplied question as
 an H3 with a two to four sentence answer directly beneath it.
@@ -208,7 +236,24 @@ export async function buildOutline(
   const ctx = await buildContext(siteId);
 
   const facts = await gatherFacts(siteId);
-  const pageList = ctx.pages.slice(0, 50).map((p) => `  ${p.url} — "${p.title}"`).join('\n');
+  const pageList = ctx.pages.slice(0, 50).map((p) => `  ${p.url} — "${p.title}"${p.topic ? ` (${p.topic})` : ''}`).join('\n');
+
+  // Articles already published on this site become link targets too, so each new
+  // post weaves into a topic cluster instead of standing alone. Only published
+  // pieces have a live URL to point at, and a post never links to itself.
+  const posts = (
+    await db.contentPiece.findMany({
+      where: { siteId, status: 'PUBLISHED', wpUrl: { not: null } },
+      select: { title: true, wpUrl: true, targetKeyword: true, blogIdeaId: true },
+      orderBy: { publishedAt: 'desc' },
+      take: 30,
+    })
+  )
+    .filter((p) => p.blogIdeaId !== idea.id && p.wpUrl)
+    .slice(0, 25);
+  const postList = posts
+    .map((p) => `  ${p.wpUrl} — "${p.title}"${p.targetKeyword ? ` (about: ${p.targetKeyword})` : ''}`)
+    .join('\n');
 
   // The real category list, when there is a site to read it from. Asking a
   // model to pick from an actual list is the difference between a category
@@ -225,8 +270,12 @@ export async function buildOutline(
     `WHY IT IS WORTH WRITING: ${idea.rationale}`,
     idea.impressions ? `MEASURED DEMAND: ${idea.impressions} impressions, position ${idea.position?.toFixed(1) ?? '—'}` : '',
     '',
-    'PAGES ON THIS SITE (the only URLs you may link to):',
+    'SITE PAGES — products, pricing, features (link here where the topic leads a reader to act):',
     pageList,
+    postList
+      ? '\nRELATED ARTICLES ALREADY PUBLISHED (link to the most relevant of these for topical depth):\n' + postList
+      : '',
+    '\n(You may only link to URLs in the two lists above.)',
     wpCategories.length
       ? '\nCATEGORIES THAT EXIST ON THIS SITE (pick exactly one, copied verbatim, or leave `category` empty if none fit):\n' +
         wpCategories.slice(0, 40).map((c) => `  ${c.name}${c.count ? ` (${c.count} posts)` : ''}`).join('\n')
@@ -246,7 +295,7 @@ export async function buildOutline(
   }
 
   // Drop any link the model invented despite being told not to.
-  const real = new Set(ctx.pages.map((p) => p.url));
+  const real = new Set<string>([...ctx.pages.map((p) => p.url), ...posts.map((p) => p.wpUrl as string)]);
   parsed.data.internalLinks = parsed.data.internalLinks.filter((l) => real.has(l.url));
   parsed.data.slug = slugify(parsed.data.slug || parsed.data.title);
 

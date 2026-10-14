@@ -235,6 +235,119 @@ export async function generateIdeas(
   return { ideas: parsed.data.ideas, usage: res.usage, model: res.model };
 }
 
+// ---------------------------------------------------------------- keyword ideas
+
+const KeywordIdeaSchema = z.object({
+  keyword: z.string(),
+  // The model freely invents intent labels (COMPARATIVE, "buyer", …). We never
+  // use the value — the keyword is the point — so accept any string rather than
+  // let one odd label reject the whole batch.
+  intent: z.string().optional(),
+});
+const KeywordIdeaResponse = z.object({ keywords: z.array(KeywordIdeaSchema).min(1).max(80) });
+
+const KEYWORD_SYSTEM = `You are an SEO keyword researcher working on one specific website.
+
+Produce realistic search keywords a real person would type into Google to find this
+business or the kind of content it publishes.
+
+Rules:
+- Mix short "head" terms with longer long-tail phrases: questions ("how to ..."),
+  comparisons ("x vs y", "best ... for ..."), and buyer phrases ("... pricing", "... near me").
+- Cover a spread of intent: informational, commercial, and transactional.
+- Be specific to THIS business and its niche. A keyword that could fit any site in the
+  industry is a weak suggestion — drop it.
+- Stay on-topic using the existing pages and any Search Console queries provided, and do
+  not repeat keywords that are already listed.
+- Do NOT invent search volume, difficulty, or any numbers. Keywords only.
+- Lowercase, no surrounding quotes, no duplicates.
+
+Return JSON only, shaped exactly:
+{"keywords":[{"keyword":"gym management software","intent":"COMMERCIAL"}]}`;
+
+function renderKeywordPrompt(ctx: SiteContext, count: number, seed: string, avoid: string[]): string {
+  const lines: string[] = [];
+  lines.push(`WEBSITE: ${ctx.domain}`);
+  lines.push(`WHAT IT IS: ${ctx.summary}`);
+  lines.push('');
+
+  if (ctx.pages.length) {
+    lines.push(`EXISTING PAGES (topics this site already covers):`);
+    for (const p of ctx.pages.slice(0, 40)) lines.push(`  "${p.title}"${p.topic ? ` — ${p.topic}` : ''}`);
+    lines.push('');
+  }
+
+  const anchors = [...ctx.winning, ...ctx.nearMiss].slice(0, 25);
+  if (anchors.length) {
+    lines.push('REAL SEARCH QUERIES THIS SITE ALREADY GETS (stay in this territory):');
+    for (const k of anchors) lines.push(`  "${k.query}"`);
+    lines.push('');
+  }
+
+  if (seed.trim()) {
+    lines.push(`FOCUS: concentrate on keywords closely related to "${seed.trim()}".`);
+    lines.push('');
+  }
+
+  if (avoid.length) {
+    lines.push('ALREADY IN THE LIST — do not repeat these:');
+    for (const t of avoid.slice(0, 120)) lines.push(`  ${t}`);
+    lines.push('');
+  }
+
+  lines.push(`Produce ${count} keywords.`);
+  return lines.join('\n');
+}
+
+/**
+ * Generate keyword ideas with the model. Discovery only: the model proposes
+ * relevant terms grounded in the site, but never volume or difficulty — those
+ * come from a real provider, never a guess.
+ */
+export async function generateKeywordIdeas(
+  siteId: string,
+  count = 20,
+  seed = '',
+): Promise<{ keywords: { keyword: string; intent?: string }[]; usage: LlmUsage; model: string }> {
+  const site = await db.site.findUniqueOrThrow({ where: { id: siteId } });
+  const ctx = await buildContext(siteId);
+
+  if (ctx.pages.length === 0 && !seed.trim()) {
+    throw new Error('Crawl the website first, or type a topic to expand from.');
+  }
+
+  const existing = await db.keyword.findMany({ where: { siteId }, select: { keyword: true }, take: 400 });
+
+  const res = await completeJson<unknown>({
+    model: site.ideaModel,
+    maxTokens: 3000,
+    temperature: 0.7,
+    messages: [
+      { role: 'system', content: KEYWORD_SYSTEM },
+      { role: 'user', content: renderKeywordPrompt(ctx, count, seed, existing.map((e) => e.keyword)) },
+    ],
+  });
+
+  const parsed = KeywordIdeaResponse.safeParse(res.data);
+  if (!parsed.success) {
+    throw new Error(`The model returned an unexpected shape: ${parsed.error.issues[0]?.message ?? 'unknown'}`);
+  }
+
+  // De-dupe against each other and against what the site already has.
+  const seen = new Set(existing.map((e) => e.keyword.toLowerCase()));
+  const out: { keyword: string; intent?: string }[] = [];
+  for (const k of parsed.data.keywords) {
+    const kw = k.keyword.trim();
+    if (kw.length < 2 || kw.length > 120) continue;
+    const key = kw.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ keyword: kw, intent: k.intent });
+  }
+
+  return { keywords: out, usage: res.usage, model: res.model };
+}
+
 /** Work out which signal an idea came from, so the UI can show its provenance. */
 export function classifySource(idea: GeneratedIdea, ctx: SiteContext): { source: IdeaSource; impressions?: number; clicks?: number; position?: number } {
   const q = idea.targetQuery.toLowerCase().trim();

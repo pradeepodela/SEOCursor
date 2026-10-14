@@ -89,7 +89,9 @@ export async function syncSearchConsole(siteId: string, days: number): Promise<S
       if (!prev || row.impressions > prev.impressions) bestPageFor.set(query, { path, impressions: row.impressions });
     }
 
-    await db.keyword.deleteMany({ where: { siteId } });
+    // Only clear what Search Console itself owns — keywords added by hand or
+    // pulled from a volume provider must survive a re-sync.
+    await db.keyword.deleteMany({ where: { siteId, source: 'SEARCH_CONSOLE' } });
 
     const keywordRows = queryRows.map((row) => {
       const query = row.keys[0];

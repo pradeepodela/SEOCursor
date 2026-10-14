@@ -160,7 +160,50 @@ input, textarea, select { font: inherit; color: inherit; }
 .nav-item.active .nav-count { background: #24304a; color: #a9bed8; }
 .nav-count.hot { background: #3a1d1d; color: #f87171; }
 
-.rail-foot { border-top: 1px solid var(--rail-border); padding: 10px; flex: 0 0 auto; }
+.nav-new {
+  margin-left: auto; font-size: 9.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em;
+  color: #7dd3fc; background: #15324a; border: 1px solid #1e4a6b;
+  padding: 1px 6px; border-radius: 99px;
+}
+.nav-new + .nav-count { margin-left: 6px; }
+
+.rail-gap { height: 14px; }
+
+.rail-foot { border-top: 1px solid var(--rail-border); padding: 10px 10px 12px; flex: 0 0 auto; }
+
+.plan-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: var(--r-sm);
+  color: var(--rail-text); transition: background .12s;
+}
+.plan-row:hover { background: var(--rail-2); }
+.plan-ic { color: #6b7787; flex: 0 0 auto; }
+.plan-ic-ai {
+  width: 20px; height: 20px; flex: 0 0 20px; border-radius: 6px;
+  display: grid; place-items: center; color: #fff;
+  background: linear-gradient(140deg, #6366f1, #4f46e5);
+  box-shadow: 0 1px 4px rgba(79,70,229,.45);
+}
+.plan-val { font-size: 12.5px; font-weight: 650; color: var(--rail-text-hi); font-variant-numeric: tabular-nums; }
+.plan-lbl { font-size: 12px; color: var(--rail-text); }
+
+.rail-user {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 8px; padding: 8px; border-radius: var(--r);
+  border: 1px solid var(--rail-border); background: var(--rail-2);
+  transition: border-color .12s;
+}
+.rail-user:hover { border-color: #2a3444; }
+.rail-av {
+  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 99px;
+  background: linear-gradient(140deg, #6366f1, #2563eb);
+  color: #fff; font-size: 11px; font-weight: 700;
+  display: grid; place-items: center;
+}
+.rail-user-meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.rail-user-name { font-size: 12.5px; font-weight: 600; color: var(--rail-text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-user-sub { font-size: 11px; color: #6b7787; }
 
 /* ------------------------------------------------ main column */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
